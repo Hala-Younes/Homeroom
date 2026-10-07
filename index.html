@@ -498,7 +498,7 @@ function toggleTaskGeneric(id){
   if(id.startsWith('hwt_')){const rest=id.slice(4),us=rest.lastIndexOf('_'),sid=rest.slice(0,us),pid=rest.slice(us+1);toggleHw(sid,pid);return}
   const t=S.tasks.find(x=>x.id===id);if(!t)return;t.done=!t.done;log('task',id,`${esc(t.title)} marked ${t.done?'done':'not done'}.`);persist();refresh();
 }
-function canMarkTask(t){return isAdmin()||(isParent()&&parentScope().includes(t.personId))||(isMember()&&t.personId===V.id)}
+function canMarkTask(t){return isAdmin()||(isParent()&&parentScope().includes(t.personId))||(isMember()&&memberScope().includes(t.personId))}
 function rangeFor(preset,from,to){
   const t=today();
   if(preset==='7')return [addDays(t,-6),t];
@@ -515,7 +515,7 @@ function rangeFor(preset,from,to){
 function visibleEvents(){
   let l=S.events.filter(e=>e.householdId===CH);
   if(isTeacher())return [];
-  if(isMember())l=l.filter(e=>e.participants.includes(V.id));
+  if(isMember()){const ms=memberScope();l=l.filter(e=>e.participants.some(id=>ms.includes(id)))}
   if(isParent()){const sc=parentScope();l=l.filter(e=>e.participants.some(id=>sc.includes(id)))}
   return l.sort((a,b)=>a.date===b.date?a.start.localeCompare(b.start):a.date.localeCompare(b.date));
 }
@@ -539,7 +539,7 @@ function createEvent(o){
 function schoolFor(pid){return S.schoolCalendars.find(x=>x.personId===pid)}
 function visibleSchoolPeople(){
   if(isTeacher())return [];
-  if(isMember())return [person(V.id)];
+  if(isMember())return memberScope().map(person).filter(Boolean);
   if(isParent())return parentScope().map(person).filter(Boolean);
   return activePeople();
 }
@@ -643,6 +643,8 @@ function buildNotifications(){
    ===================================================================== */
 let V={kind:'admin',id:null};
 const isAdmin=()=>V.kind==='admin',isMember=()=>V.kind==='member',isTeacher=()=>V.kind==='teacher',isParent=()=>V.kind==='parent';
+/* A student sees their own profile plus any other students the admin granted (person.siblingAccess). */
+const memberScope=()=>{const p=person(V.id);return p?[p.id,...(p.siblingAccess||[]).filter(id=>person(id))]:[]};
 const parentScope=()=>{const p=person(V.id);return (p&&p.childrenAccess)||[]};
 const canSeeMoney=()=>isAdmin()||(isParent()&&!!(person(V.id)||{}).financeAccess);
 const canSeePrivate=()=>isAdmin()||isTeacher()||isParent();
@@ -650,13 +652,13 @@ function canSeePrivateFor(c){if(isAdmin()||isParent())return true;if(isTeacher()
 function myCourses(){
   if(isAdmin())return hhCourses();
   if(isParent()){const sc=parentScope();return hhCourses().filter(c=>S.enrollments.some(e=>e.courseId===c.id&&e.active&&sc.includes(e.personId)))}
-  if(isMember())return hhCourses().filter(c=>S.enrollments.some(e=>e.courseId===c.id&&e.personId===V.id&&e.active));
+  if(isMember())return hhCourses().filter(c=>S.enrollments.some(e=>e.courseId===c.id&&memberScope().includes(e.personId)&&e.active));
   return S.courses.filter(c=>c.teacherAccess&&c.teacherId===V.id);
 }
 function visibleParts(s){
   if(isAdmin())return s.participants;
   if(isParent()){const sc=parentScope();return s.participants.filter(p=>sc.includes(p.personId))}
-  if(isMember())return s.participants.filter(p=>p.personId===V.id);
+  if(isMember())return s.participants.filter(p=>memberScope().includes(p.personId));
   const c=course(s.courseId);if(!c||!c.teacherAccess||c.teacherId!==V.id)return [];
   return s.participants.filter(p=>{const e=S.enrollments.find(e=>e.courseId===c.id&&e.personId===p.personId);return !e||e.teacherAccess!==false});
 }
@@ -664,12 +666,12 @@ const visibleSessions=()=>{const ids=new Set(myCourses().map(c=>c.id));return S.
 function visiblePeople(){
   if(isAdmin())return activePeople();
   if(isParent())return activePeople().filter(p=>parentScope().includes(p.id));
-  if(isMember())return S.people.filter(p=>p.id===V.id);
+  if(isMember())return S.people.filter(p=>memberScope().includes(p.id));
   const ids=new Set();visibleSessions().forEach(s=>visibleParts(s).forEach(p=>ids.add(p.personId)));
   const c=myCourses().map(c=>c.id);S.enrollments.filter(e=>c.includes(e.courseId)&&e.teacherAccess!==false).forEach(e=>ids.add(e.personId));
   return S.people.filter(p=>ids.has(p.id));
 }
-const canMark=(s,pid)=>isAdmin()||(isParent()&&parentScope().includes(pid))||(isMember()&&pid===V.id);
+const canMark=(s,pid)=>isAdmin()||(isParent()&&parentScope().includes(pid))||(isMember()&&memberScope().includes(pid));
 const canEditNotes=s=>isAdmin()||isMember()||isTeacher()||isParent();
 const canReschedule=s=>isAdmin()||(isParent()&&parentScope().includes(s.participants[0]&&s.participants[0].personId))||(isMember()&&course(s.courseId).memberCanReschedule!==false);
 function viewerLabel(){if(isAdmin())return (person(V.id)||{}).name+' · Admin';if(isParent())return (person(V.id)||{}).name+' · Parent';if(isMember())return (person(V.id)||{}).name;const t=S.teachers.find(t=>t.id===V.id);return t?t.name+' · Teacher':'Teacher'}
@@ -687,7 +689,7 @@ function myGroupMemberships(){return S.courseGroups.filter(g=>g.members.some(m=>
   if(isTeacher())return m.role==='teacher'&&m.refId===V.id;
   if(!m.personId)return false;
   if(isAdmin())return (person(m.personId)||{}).householdId===CH;
-  return m.personId===V.id||(isParent()&&parentScope().includes(m.personId));
+  return m.personId===V.id||(isMember()&&memberScope().includes(m.personId))||(isParent()&&parentScope().includes(m.personId));
 }))}
 function groupMember(g,personId){return g.members.find(m=>m.personId===personId)}
 function myGroupRole(g){
@@ -1048,7 +1050,7 @@ function paymentsCard(){
 }
 function nearCompletionCard(){
   let fs=allForecasts().filter(f=>f.level!=='ok');
-  if(isMember())fs=fs.filter(f=>f.personId===V.id);
+  if(isMember())fs=fs.filter(f=>memberScope().includes(f.personId));
   const body=fs.length?`<div class="list">${fs.map(f=>{const c=course(f.courseId);const L=ledger(f.personId,f.courseId);const p=L.active||L.latest;return `<div class="li">${avatar(f.personId,28)}<div class="grow"><div class="b">${esc(person(f.personId).name)} — ${esc(c.name)}</div>${p?progressBar(p.used,p.size,f.level,pc(f.personId)):''}<div class="tiny muted" style="margin-top:3px">${p?`${p.used} / ${p.size} used`:''}${f.level==='due'?' · payment due':''}</div></div></div>`}).join('')}</div>`:emptyMsg('No packages are close to finishing.');
   return sec('Packages near completion','chart',body);
 }
@@ -1069,7 +1071,7 @@ function fbVisible(f){
   const s=sess(f.sessionId);if(!s)return false;const c=course(s.courseId);
   if(isAdmin())return true;
   if(isTeacher())return c.teacherAccess&&c.teacherId===V.id;
-  return f.personId===V.id&&f.shareWithStudent!==false;
+  return (isMember()?memberScope():[V.id]).includes(f.personId)&&f.shareWithStudent!==false;
 }
 function feedbackCard(){
   const list=S.feedback.filter(fbVisible).sort((a,b)=>b.createdOn.localeCompare(a.createdOn)).slice(0,3);
@@ -1565,6 +1567,8 @@ function viewSettings(){
   <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="confirmBox('Set up a new family?','This clears everything saved in this browser and opens the Welcome screen, where you can set up your own family or explore the demo.${acctNote()}','restartOnboarding()')">Set up a new family</button><button class="btn" onclick="confirmBox('Reset demo data?','This replaces everything with the sample households (Hala, Omar, Sara). Your changes will be lost.','resetDemo()')">Reset demo data</button><button class="btn bad" onclick="confirmBox('Start with an empty app?','This removes all sample and entered data, leaving one admin profile.${acctNote()}','clearAll()')">Clear all data</button><button class="btn" onclick="openModal({type:'export'})">Export JSON</button>${SBU?`<button class="btn" onclick="cloudSignOut()">Sign out</button>`:`<button class="btn" onclick="showAuth('in')">Sign in</button>`}</div>`)+`</div><div style="height:14px"></div>`
   +(accessSection()?accessSection()+`<div style="height:14px"></div>`:'')
   +sec('Public holidays','flag',`<p class="small muted">Full year-by-year view, editing and Family Breaks planning has moved to <b>Holidays &amp; Breaks</b> in the main menu — this is just the quick admin list.</p><div class="list">${S.holidays.filter(h=>h.householdId===CH).sort((a,b)=>a.date.localeCompare(b.date)).map(h=>`<div class="li"><div class="grow"><b>${esc(h.name)}</b> ${holidayStatusBadge(h)}<div class="small muted">${fmtD(h.date)}${h.to&&h.to!==h.date?' – '+fmtD(h.to):''}</div></div><button class="btn sm" onclick="openModal({type:'holiday',id:'${h.id}'})">${ic('edit',14)}</button><button class="btn sm bad" onclick="deleteHoliday('${h.id}')">${ic('trash',14)}</button></div>`).join('')||emptyMsg('No holidays added yet.')}</div><button class="btn sm" style="margin-top:8px" onclick="openModal({type:'holiday'})">${ic('plus',14)} Add holiday</button>`)
+  +sec('Student permissions','users',(()=>{const l=hhPeople().filter(p=>p.role==='member'&&(p.siblingAccess||[]).length);return l.map(p=>`<div class="li"><div class="grow"><b>${esc(p.name)}</b><div class="small muted">Can also see: ${p.siblingAccess.map(id=>esc((person(id)||{}).name)).join(', ')}</div></div><button class="btn sm" onclick="openModal({type:'person',id:'${p.id}'})">${ic('edit',14)} Edit</button></div>`).join('')||emptyMsg('Each student sees only their own schedule. To let one student also see another, edit the student under People and pick who they can also see.')})())
+  +`<div style="height:14px"></div>`
   +sec('Parent permissions','users',hhPeople().filter(p=>p.role==='parent').map(p=>`<div class="li"><div class="grow"><b>${esc(p.name)}</b><div class="small muted">Sees: ${(p.childrenAccess||[]).map(id=>esc((person(id)||{}).name)).join(', ')||'nobody yet'} · ${p.financeAccess?'can see payments':'no financial access'}</div></div><button class="btn sm" onclick="openModal({type:'person',id:'${p.id}'})">${ic('edit',14)} Edit</button></div>`).join('')||emptyMsg('No separate Parent accounts yet — add one from People, with role “Parent”.'))
   +`<div style="height:14px"></div>`
   +sec('Teacher access','lock',(()=>{const cs=hhCourses().filter(c=>c.teacherName);return cs.map(c=>`<div class="li"><div class="grow"><div class="b">${esc(c.name)}</div><div class="small muted">${esc(c.teacherName)} · ${c.teacherAccess?'Can see this course’s assigned students, feedback & private parent notes. No finances.':'No access'}</div></div>${c.teacherAccess?`<button class="btn sm bad" onclick="askRevokeTeacher('${c.id}')">Revoke</button>`:`<button class="btn sm" onclick="setTeacherAccess('${c.id}',true)">Enable</button>`}</div>`).join('')||emptyMsg('No teachers yet.')})())+`<div style="height:14px"></div>`
@@ -1654,7 +1658,7 @@ function mSession(m){
    ${isTeacher()?'':`<div class="fld"><label class="f">General notes ${isMember()?'':'(family only)'}</label><textarea oninput="setField('${s.id}','notes',this.value)">${esc(s.notes)}</textarea></div>`}</div></details>`;
   // feedback
   if(c.teacherAccess||S.feedback.some(f=>f.sessionId===s.id)){
-    const fbParts=parts.filter(p=>isMember()?p.personId===V.id:true);
+    const fbParts=parts.filter(p=>isMember()?memberScope().includes(p.personId):true);
     const forms=fbParts.map(p=>{const f=S.feedback.find(x=>x.sessionId===s.id&&x.personId===p.personId);
       if(isMember()){return f&&f.shareWithStudent!==false?fbBlock(f):''}
       return fbForm(s,p.personId,f)}).join('');
@@ -1852,17 +1856,21 @@ function mPerson(m){
   <div id="pp-parent" style="display:${p&&p.role==='parent'?'block':'none'}">
   <div class="fld"><label class="f">Sees calendar, homework & progress for</label><div class="chips">${hhPeople().filter(x=>!p||x.id!==p.id).map(c=>`<label class="chip" style="cursor:pointer"><input type="checkbox" class="pp-child" value="${c.id}" ${p&&(p.childrenAccess||[]).includes(c.id)?'checked':''}> ${esc(c.name)}</label>`).join('')||'<span class="muted small">Add other family members first.</span>'}</div></div>
   <label class="small" style="display:flex;gap:8px;margin-bottom:10px"><input type="checkbox" id="pp-fin" ${p&&p.financeAccess?'checked':''}> Can also see packages & payments for those children</label></div>
+  <div id="pp-member" style="display:${!p||p.role==='member'?'block':'none'}">
+  <div class="fld"><label class="f">This student can also see (needs their own sign-in)</label><div class="chips">${hhPeople().filter(x=>x.role==='member'&&(!p||x.id!==p.id)).map(c=>`<label class="chip" style="cursor:pointer"><input type="checkbox" class="pp-sib" value="${c.id}" ${p&&(p.siblingAccess||[]).includes(c.id)?'checked':''}> ${esc(c.name)}</label>`).join('')||'<span class="muted small">Add other students first.</span>'}</div>
+  <div class="tiny muted" style="margin-top:4px">They can view and mark attendance, homework and tasks for these students, like their own. Payments, private parent notes and other family members stay hidden.</div></div></div>
   ${p?`<label class="small" style="display:flex;gap:8px;margin-bottom:12px"><input type="checkbox" id="pp-arch" ${p.active===false?'checked':''}> Archive (hide from lists; history is kept)</label>`:''}
   <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn pri" onclick="savePerson('${p?p.id:''}')">Save</button></div>`);
 }
-function personRoleChanged(){$('pp-parent').style.display=$('pp-role').value==='parent'?'block':'none'}
+function personRoleChanged(){const r=$('pp-role').value;$('pp-parent').style.display=r==='parent'?'block':'none';$('pp-member').style.display=r==='member'?'block':'none'}
 function savePerson(id){
   const name=$('pp-name').value.trim();if(!name){toast('Please enter a name.','warn');return}
   const col=(document.querySelector('input[name=pp-col]:checked')||{}).value||PALETTE[0],role=$('pp-role').value;
   const childrenAccess=role==='parent'?[...document.querySelectorAll('.pp-child:checked')].map(x=>x.value):undefined;
   const financeAccess=role==='parent'?($('pp-fin')?$('pp-fin').checked:false):undefined;
-  if(id){const p=person(id);Object.assign(p,{name,color:col,role});if(role==='parent'){p.childrenAccess=childrenAccess;p.financeAccess=financeAccess}else{delete p.childrenAccess;delete p.financeAccess}if($('pp-arch'))p.active=!$('pp-arch').checked}
-  else S.people.push({id:uid('p'),name,color:col,role,active:true,householdId:CH,...(role==='parent'?{childrenAccess,financeAccess}:{})});
+  const siblingAccess=role==='member'?[...document.querySelectorAll('.pp-sib:checked')].map(x=>x.value):[];
+  if(id){const p=person(id);Object.assign(p,{name,color:col,role});if(role==='parent'){p.childrenAccess=childrenAccess;p.financeAccess=financeAccess}else{delete p.childrenAccess;delete p.financeAccess}if(siblingAccess.length)p.siblingAccess=siblingAccess;else delete p.siblingAccess;if($('pp-arch'))p.active=!$('pp-arch').checked}
+  else S.people.push({id:uid('p'),name,color:col,role,active:true,householdId:CH,...(role==='parent'?{childrenAccess,financeAccess}:{}),...(siblingAccess.length?{siblingAccess}:{})});
   persist();closeModal();toast(id?'Person updated':name+' added');
 }
 
