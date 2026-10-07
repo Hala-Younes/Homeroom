@@ -36,7 +36,7 @@ h1{font-size:26px}h2{font-size:19px}h3{font-size:16px}
 .top .grow{flex:1;min-width:0}
 .viewas{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--muted)}
 .viewas select{max-width:190px}
-select,input[type=text],input[type=number],input[type=date],input[type=time],textarea{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:9px 11px;width:100%;min-width:0}
+select,input[type=text],input[type=password],input[type=number],input[type=date],input[type=time],textarea{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:9px 11px;width:100%;min-width:0}
 textarea{resize:vertical;min-height:64px}
 label.f{display:block;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:5px}
 .fld{margin-bottom:12px}
@@ -193,6 +193,7 @@ table.tb td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
 <div id="modal-root"></div>
 <div id="confirm-root"></div>
 <div id="toast-root"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
 'use strict';
 /* =====================================================================
@@ -225,7 +226,7 @@ const ic=(n,s=18)=>`<svg class="ic" width="${s}" height="${s}" viewBox="0 0 24 2
 
 /* ---------- store (swap persist/loadState for a real API later) ---------- */
 let S=null;const KEY='homeroom.v2';let storageOK=true;let CH=null;
-function persist(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){storageOK=false}}
+function persist(){try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){storageOK=false}if(typeof cloudQueue==='function')cloudQueue()}
 function loadState(){try{const r=localStorage.getItem(KEY);if(r){const o=JSON.parse(r);if(o&&o.people&&o.sessions){migrate(o);return o}}}catch(e){storageOK=false}return null}
 function migrate(o){
   const d=k=>{if(!o[k])o[k]=[]};
@@ -1553,8 +1554,8 @@ function viewSettings(){
   <div class="fld"><label class="f">Country (for public holidays)</label><input type="text" value="${esc(myHousehold().country||'Egypt')}" disabled></div>
   <div class="fld"><label class="f">Week starts on</label><select onchange="S.settings.weekStart=+this.value;persist();render()">${[6,0,1].map(d=>`<option value="${d}" ${ws===d?'selected':''}>${['Sunday','Monday','','','','','Saturday'][d]}</option>`).join('')}</select></div>
   <div class="small muted">Sessions are generated ${S.settings.horizon||112} days ahead from each recurring schedule.</div>`)
-  +sec('Data','note',`<p class="small">${storageOK?'Saved in this browser on this device only. There is no sync between devices in this prototype.':'Browser storage isn’t available here, so data lives only while this page is open.'}</p>
-  <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="confirmBox('Set up a new family?','This clears everything saved in this browser and opens the Welcome screen, where you can set up your own family or explore the demo.','restartOnboarding()')">Set up a new family</button><button class="btn" onclick="confirmBox('Reset demo data?','This replaces everything with the sample households (Hala, Omar, Sara). Your changes will be lost.','resetDemo()')">Reset demo data</button><button class="btn bad" onclick="confirmBox('Start with an empty app?','This removes all sample and entered data, leaving one admin profile.','clearAll()')">Clear all data</button><button class="btn" onclick="openModal({type:'export'})">Export JSON</button></div>`)+`</div><div style="height:14px"></div>`
+  +sec('Data','note',`<p class="small">${cloudStatusText()}</p>
+  <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="confirmBox('Set up a new family?','This clears everything saved in this browser and opens the Welcome screen, where you can set up your own family or explore the demo.','restartOnboarding()')">Set up a new family</button><button class="btn" onclick="confirmBox('Reset demo data?','This replaces everything with the sample households (Hala, Omar, Sara). Your changes will be lost.','resetDemo()')">Reset demo data</button><button class="btn bad" onclick="confirmBox('Start with an empty app?','This removes all sample and entered data, leaving one admin profile.','clearAll()')">Clear all data</button><button class="btn" onclick="openModal({type:'export'})">Export JSON</button>${SBU?`<button class="btn" onclick="cloudSignOut()">Sign out</button>`:`<button class="btn" onclick="showAuth('in')">Sign in</button>`}</div>`)+`</div><div style="height:14px"></div>`
   +sec('Public holidays','flag',`<p class="small muted">Full year-by-year view, editing and Family Breaks planning has moved to <b>Holidays &amp; Breaks</b> in the main menu — this is just the quick admin list.</p><div class="list">${S.holidays.filter(h=>h.householdId===CH).sort((a,b)=>a.date.localeCompare(b.date)).map(h=>`<div class="li"><div class="grow"><b>${esc(h.name)}</b> ${holidayStatusBadge(h)}<div class="small muted">${fmtD(h.date)}${h.to&&h.to!==h.date?' – '+fmtD(h.to):''}</div></div><button class="btn sm" onclick="openModal({type:'holiday',id:'${h.id}'})">${ic('edit',14)}</button><button class="btn sm bad" onclick="deleteHoliday('${h.id}')">${ic('trash',14)}</button></div>`).join('')||emptyMsg('No holidays added yet.')}</div><button class="btn sm" style="margin-top:8px" onclick="openModal({type:'holiday'})">${ic('plus',14)} Add holiday</button>`)
   +sec('Parent permissions','users',hhPeople().filter(p=>p.role==='parent').map(p=>`<div class="li"><div class="grow"><b>${esc(p.name)}</b><div class="small muted">Sees: ${(p.childrenAccess||[]).map(id=>esc((person(id)||{}).name)).join(', ')||'nobody yet'} · ${p.financeAccess?'can see payments':'no financial access'}</div></div><button class="btn sm" onclick="openModal({type:'person',id:'${p.id}'})">${ic('edit',14)} Edit</button></div>`).join('')||emptyMsg('No separate Parent accounts yet — add one from People, with role “Parent”.'))
   +`<div style="height:14px"></div>`
@@ -2267,9 +2268,10 @@ function showWelcome(){
       <div class="brand" style="padding:0"><i></i>Homeroom</div>
       <h1>Welcome to Homeroom</h1>
       <p class="lead">Organize your family's courses, school schedules, activities, payments and plans in one place.</p>
-      <div class="choices"><button class="btn pri" onclick="onbGo(1)">${ic('users',18)} Set up my family</button>
-      <button class="btn" onclick="exploreDemo()">${ic('home',18)} Explore a demo family</button></div>
-      <p class="tiny muted" style="margin:18px 0 0">This is a prototype being tested. Your data stays in this browser on this device.</p>
+      <div class="choices"><button class="btn pri" onclick="startSetup()">${ic('users',18)} Set up my family</button>
+      <button class="btn" onclick="exploreDemo()">${ic('home',18)} Explore a demo family</button>
+      ${SBU?'':`<button class="btn" onclick="showAuth('in')">${ic('lock',18)} Sign in to my account</button>`}</div>
+      <p class="tiny muted" style="margin:18px 0 0">${SBU?`Signed in as ${esc(SBU.email||'')}. <a href="#" onclick="cloudSignOut();return false">Sign out</a>. `:''}This is a prototype being tested. The demo stays in this browser; a family you set up is saved to your account.</p>
     </div></div>`;
     return;
   }
@@ -2504,7 +2506,170 @@ function restartOnboarding(){
   try{localStorage.removeItem(KEY)}catch(e){}
   S=null;onb=freshOnb();ui.modal=null;ui.tab='home';ui.more=false;closeConfirm();showWelcome();
 }
-function leaveDemoForSetup(){confirmBox('Set up your own family?','This closes the demo and starts setting up your family. You can reopen the demo later from Settings → Reset demo data.','restartOnboarding();onbGo(1)')}
+function leaveDemoForSetup(){confirmBox('Set up your own family?','This closes the demo and starts setting up your family. You can reopen the demo later from Settings → Reset demo data.','restartOnboarding();startSetup()')}
+
+/* =====================================================================
+   CLOUD SYNC (Supabase). Local state S stays the working copy; real-family data
+   (S.mode==='real') is mirrored to Supabase per entity. persist() queues a debounced
+   sync that diffs each collection against the last-synced snapshot and upserts changed
+   rows / deletes removed ones. Demo data never leaves the browser.
+   Tables: see the homeroom_core_schema migration (id, household_id, data jsonb).
+   ===================================================================== */
+const SB_URL='https://pqganolgbvbybnshabsu.supabase.co',SB_KEY='sb_publishable_oFub4oh-E28t7dcECz1_LQ_inErbOhg';
+let sb=null,SBU=null,authCtx={mode:'in',next:null};
+try{sb=window.supabase.createClient(SB_URL,SB_KEY)}catch(e){}
+const cloud={snap:{},status:'off',err:'',timer:null,busy:false,again:false,hid:null};
+const CMAP=[['people','people'],['teachers','teachers'],['courses','courses'],['enrollments','enrollments'],['schedules','schedules'],['sessions','sessions'],['feedback','feedback'],['tasks','tasks'],['events','events'],['schoolCalendars','school_calendars'],['schoolImports','school_imports'],['holidays','holidays'],['audit','audit'],['protoFeedback','proto_feedback'],['packages','packages'],['payments','payments']];
+const CSHARED=[['circles','circles'],['sharedPlans','shared_plans'],['courseGroups','course_groups']];
+const CALL=()=>[...CMAP.map(x=>[...x,false]),...CSHARED.map(x=>[...x,true])];
+function rowHid(col,o){
+  switch(col){
+    case 'people':case 'courses':case 'events':case 'holidays':return o.householdId||CH;
+    case 'tasks':case 'schoolCalendars':case 'schoolImports':return (person(o.personId)||{}).householdId||CH;
+    case 'feedback':{const c=course((sess(o.sessionId)||{}).courseId);return (c&&c.householdId)||CH}
+    case 'enrollments':case 'schedules':case 'sessions':case 'packages':case 'payments':{const c=course(o.courseId);return (c&&c.householdId)||CH}
+    default:return CH;
+  }
+}
+function sharedHids(col,o){
+  const h=col==='circles'?(o.households||[]).map(x=>x.householdId):col==='sharedPlans'?(o.households||[]):(o.members||[]).map(m=>m.householdId).filter(Boolean);
+  return [...new Set(h)];
+}
+function cloudRows(col,shared,hid){
+  const next={},rows=[];
+  (S[col]||[]).forEach(o=>{
+    let row;
+    if(shared){const ids=sharedHids(col,o);if(!ids.includes(hid))return;row={id:o.id,household_ids:ids,data:o}}
+    else{if(rowHid(col,o)!==hid)return;row={id:o.id,household_id:hid,data:o}}
+    next[o.id]=JSON.stringify(row);rows.push(row);
+  });
+  return {next,rows};
+}
+function cloudQueue(){
+  if(!sb||!SBU||!S||S.mode!=='real'||!S.households.length)return;
+  clearTimeout(cloud.timer);cloud.timer=setTimeout(cloudSync,800);
+}
+function setCloud(st,err){
+  cloud.status=st;cloud.err=err||'';
+  if(st==='error')toast('Could not sync to your account: '+cloud.err,'warn');
+  if(ui&&ui.tab==='settings'&&!ui.modal&&S){try{render()}catch(e){}}
+}
+async function cloudSync(){
+  if(!sb||!SBU||!S||S.mode!=='real'||!S.households.length)return;
+  if(cloud.busy){cloud.again=true;return}
+  cloud.busy=true;setCloud('syncing');
+  try{
+    const h=S.households.find(x=>x.id===CH)||S.households[0],hid=h.id;
+    if(cloud.hid!==hid){
+      const {data:ex,error:e0}=await sb.from('households').select('id').eq('id',hid).maybeSingle();if(e0)throw e0;
+      if(!ex){
+        const {error}=await sb.rpc('create_household',{p_id:hid,p_name:h.name||'My family',p_country:h.country||null,p_currency:h.currency||null});if(error)throw error;
+        const adm=S.accounts.find(a=>a.householdId===hid);
+        if(adm){const {error:e2}=await sb.from('household_members').update({person_id:adm.personId}).eq('household_id',hid).eq('user_id',SBU.id);if(e2)throw e2}
+      }
+      cloud.hid=hid;cloud.snap={};
+    }
+    const meta={settings:S.settings,accounts:S.accounts,helpSeen:S.helpSeen,onboarding:S.onboarding||null};
+    const hs=JSON.stringify([h.name,h.country,h.currency,meta]);
+    if(cloud.snap.__hh!==hs){
+      const {error}=await sb.from('households').update({name:h.name||'My family',country:h.country||null,currency:h.currency||null,settings:meta}).eq('id',hid);if(error)throw error;
+      cloud.snap.__hh=hs;
+    }
+    for(const [col,tbl,shared] of CALL()){
+      const prev=cloud.snap[tbl]||{},{next,rows}=cloudRows(col,shared,hid);
+      const ups=rows.filter(r=>prev[r.id]!==next[r.id]),dels=Object.keys(prev).filter(id=>!(id in next));
+      const stamp=new Date().toISOString();
+      for(let i=0;i<ups.length;i+=200){const {error}=await sb.from(tbl).upsert(ups.slice(i,i+200).map(r=>({...r,updated_at:stamp})));if(error)throw error}
+      for(let i=0;i<dels.length;i+=200){const {error}=await sb.from(tbl).delete().in('id',dels.slice(i,i+200));if(error)throw error}
+      cloud.snap[tbl]=next;
+    }
+    setCloud('ok');
+  }catch(e){console.error(e);setCloud('error',(e&&e.message)||String(e))}
+  cloud.busy=false;
+  if(cloud.again){cloud.again=false;cloudQueue()}
+}
+async function fetchAll(tbl,col,val){
+  const out=[];
+  for(let from=0;;from+=1000){
+    let q=sb.from(tbl).select('id,data').range(from,from+999);if(col)q=q.eq(col,val);
+    const {data,error}=await q;if(error)throw error;
+    out.push(...data);if(data.length<1000)break;
+  }
+  return out;
+}
+/* Loads the user's newest household from Supabase into S. Returns true when one existed. */
+async function cloudLoad(){
+  const {data:hhs,error}=await sb.from('households').select('*').order('created_at',{ascending:false});if(error)throw error;
+  if(!hhs.length)return false;
+  const h=hhs[0],meta=h.settings||{};
+  const ns={seq:Math.floor(Date.now()/1000),households:[{id:h.id,name:h.name,country:h.country,currency:h.currency,createdOn:today()}],
+    settings:meta.settings||{horizon:112,weekStart:0},accounts:meta.accounts||[],helpSeen:!!meta.helpSeen,demoVersion:DEMO_VERSION,mode:'real'};
+  if(meta.onboarding)ns.onboarding=meta.onboarding;
+  for(const [col,tbl] of CMAP)ns[col]=(await fetchAll(tbl,'household_id',h.id)).map(r=>r.data);
+  for(const [col,tbl] of CSHARED)ns[col]=(await fetchAll(tbl)).map(r=>r.data);
+  const {data:mem}=await sb.from('household_members').select('person_id').eq('household_id',h.id).eq('user_id',SBU.id).maybeSingle();
+  S=ns;CH=h.id;cloud.hid=h.id;cloud.snap={};
+  CALL().forEach(([col,tbl,shared])=>{cloud.snap[tbl]=cloudRows(col,shared,h.id).next});
+  cloud.snap.__hh=JSON.stringify([h.name,h.country,h.currency,{settings:S.settings,accounts:S.accounts,helpSeen:S.helpSeen,onboarding:S.onboarding||null}]);
+  const adm=(mem&&mem.person_id&&person(mem.person_id))||hhPeople(CH).find(p=>p.role==='admin'&&p.active!==false);
+  V={kind:'admin',id:adm?adm.id:null};
+  try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
+  return true;
+}
+async function afterSignIn(){
+  let loaded=false;
+  try{loaded=await cloudLoad()}catch(e){console.error(e);setCloud('error',(e&&e.message)||String(e))}
+  if(loaded){
+    syncSessions();
+    if(S.onboarding&&S.onboarding.active)onbFromS();
+    ui.tab='home';ui.modal=null;render();return true;
+  }
+  if(S&&S.mode==='real'&&S.households.length){render();cloudQueue();return true}
+  return false;
+}
+function cloudStatusText(){
+  if(S&&S.mode==='real'&&SBU){
+    const t={ok:'All changes saved.',syncing:'Saving…',error:'Last sync failed: '+esc(cloud.err),off:'Waiting to sync…'}[cloud.status]||'';
+    return `Synced to your account (${esc(SBU.email||'')}) and available on any device you sign in on. ${t}`;
+  }
+  if(S&&S.mode==='real')return 'Saved in this browser only. Sign in to save this family to your account and use it on other devices.';
+  return storageOK?'This is demo data, saved in this browser only. Set up your own family to save to an account.':'Browser storage isn’t available here, so data lives only while this page is open.';
+}
+async function cloudSignOut(){
+  try{if(sb)await sb.auth.signOut()}catch(e){}
+  SBU=null;cloud.hid=null;cloud.snap={};
+  try{localStorage.removeItem(KEY)}catch(e){}
+  S=null;onb=freshOnb();ui.modal=null;ui.tab='home';closeConfirm();showWelcome();
+}
+function startSetup(){if(SBU)onbGo(1);else showAuth('up','setup')}
+function showAuth(mode,next){
+  authCtx={mode,next:next||null};const up=mode==='up';
+  $('modal-root').innerHTML='';
+  $('app').innerHTML=`<div class="welcome"><div class="card">
+    <div class="brand" style="padding:0"><i></i>Homeroom</div>
+    <h1>${up?'Create your account':'Sign in'}</h1>
+    <p class="lead">${up?'Your family’s data is saved to your account, so it is available on any device.':'Welcome back — sign in to load your family.'}</p>
+    <div class="fld"><label class="f" for="au-email">Email</label><input type="text" id="au-email" inputmode="email" autocomplete="email"></div>
+    <div class="fld"><label class="f" for="au-pw">Password</label><input type="password" id="au-pw" autocomplete="${up?'new-password':'current-password'}" onkeydown="if(event.key==='Enter')authSubmit()"></div>
+    <div id="au-err" role="alert"></div>
+    <div class="choices" style="margin-top:14px"><button class="btn pri" onclick="authSubmit()">${up?'Create account':'Sign in'}</button>
+      <button class="btn" onclick="showAuth('${up?'in':'up'}',${authCtx.next?`'${authCtx.next}'`:'null'})">${up?'I already have an account':'Create a new account'}</button>
+      <button class="btn" onclick="onb=freshOnb();showWelcome()">Back</button></div></div></div>`;
+  const f=$('au-email');if(f)f.focus();
+}
+async function authSubmit(){
+  const email=$('au-email').value.trim(),pw=$('au-pw').value,box=$('au-err');
+  const msg=(m,k)=>{box.innerHTML=`<div class="banner ${k||'bad'}" style="margin:12px 0 0">${ic(k==='info'?'bell':'alert',18)}<div class="small">${esc(m)}</div></div>`};
+  if(!sb)return msg('Sign-in is unavailable: the Supabase library could not be loaded.');
+  if(!email||pw.length<6)return msg('Enter your email and a password of at least 6 characters.');
+  const up=authCtx.mode==='up';
+  const r=up?await sb.auth.signUp({email,password:pw}):await sb.auth.signInWithPassword({email,password:pw});
+  if(r.error)return msg(r.error.message);
+  if(!r.data.session){authCtx.mode='in';return msg('Check your email to confirm your account, then come back and sign in.','info')}
+  SBU=r.data.session.user;
+  if(await afterSignIn())return;
+  if(authCtx.next==='setup')onbGo(1);else showWelcome();
+}
 
 /* =====================================================================
    BOOT
@@ -2512,7 +2677,7 @@ function leaveDemoForSetup(){confirmBox('Set up your own family?','This closes t
 (function boot(){
   const st=document.createElement('style');st.textContent='.mob-only{display:block}@media(min-width:900px){.mob-only{display:none}}.mob-only .viewas select{max-width:150px}';document.head.appendChild(st);
   S=loadState();
-  if(!S){showWelcome();return}                                   // first launch: Welcome screen, nothing seeded
+  if(!S){showWelcome();if(sb)sb.auth.getSession().then(({data})=>{SBU=data.session?data.session.user:null;if(SBU)afterSignIn().then(ok=>{if(!ok)showWelcome()})});return}                                   // first launch: Welcome screen, nothing seeded
   if(!S.mode)S.mode=S.households.some(h=>h.id==='hh_hala')?'demo':'real';   // browsers with saved V2 data
   S.settings=S.settings||{horizon:112,weekStart:0};
   upgradeDemo();
@@ -2521,6 +2686,7 @@ function leaveDemoForSetup(){confirmBox('Set up your own family?','This closes t
   const adm=hhPeople(CH).find(p=>p.role==='admin'&&p.active!==false)||S.people.find(p=>p.role==='admin'&&p.active!==false);V={kind:'admin',id:adm?adm.id:null};
   if(S.onboarding&&S.onboarding.active)onbFromS();
   render();
+  if(sb)sb.auth.getSession().then(({data})=>{SBU=data.session?data.session.user:null;if(SBU)afterSignIn()});
 })();
 </script>
 </body>
