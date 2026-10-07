@@ -38,6 +38,7 @@ h1{font-size:26px}h2{font-size:19px}h3{font-size:16px}
 .viewas select{max-width:190px}
 select,input[type=text],input[type=password],input[type=number],input[type=date],input[type=time],textarea{background:var(--surface);border:1px solid var(--line);border-radius:11px;padding:9px 11px;width:100%;min-width:0}
 textarea{resize:vertical;min-height:64px}
+@media(max-width:700px){select,input[type=text],input[type=password],input[type=number],input[type=date],input[type=time],textarea{font-size:16px}}
 label.f{display:block;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:5px}
 .fld{margin-bottom:12px}
 .row{display:flex;gap:10px;flex-wrap:wrap}.row>*{flex:1;min-width:120px}
@@ -193,7 +194,7 @@ table.tb td{padding:8px;border-bottom:1px solid var(--line);vertical-align:top}
 <div id="modal-root"></div>
 <div id="confirm-root"></div>
 <div id="toast-root"></div>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.117.3/dist/umd/supabase.js" integrity="sha384-BWcjm9OdFth9TbhCxZPdm+gAOUMAzQy9nmTs12ioXdCcbVnJaPMn+fMUoQCLt60R" crossorigin="anonymous"></script>
 <script>
 'use strict';
 /* =====================================================================
@@ -238,7 +239,10 @@ function migrate(o){
   o.courses.forEach(c=>{if(!c.householdId)c.householdId=hh0});
   o.holidays.forEach(h=>{if(!h.status&&!h.demo)h.status='manual'});
 }
-const uid=p=>p+'_'+(S.seq++).toString(36)+Math.random().toString(36).slice(2,5);
+const rnd=()=>{try{const a=new Uint32Array(1);crypto.getRandomValues(a);return a[0].toString(36)}catch(e){return Math.random().toString(36).slice(2,8)}};
+const uid=p=>p+'_'+(S.seq++).toString(36)+rnd();
+const safeUrl=u=>/^https?:\/\//i.test(u||'')?u:'';
+const acctNote=()=>(typeof SBU!=='undefined'&&SBU&&S&&S.mode==='real')?' It also permanently deletes the copy saved in your account.':'';
 function log(kind,id,text){S.audit.push({id:uid('a'),ts:new Date().toISOString(),kind,entityId:id,text});if(S.audit.length>600)S.audit.splice(0,100)}
 
 /* ---------- lookups ---------- */
@@ -942,12 +946,12 @@ function render(){
   const moreSheet=ui.more?`<div class="ov" onclick="ui.more=false;render()"><div class="sheet" onclick="event.stopPropagation()"><div class="list">${extra.map(t=>`<button class="nav" onclick="goTab('${t[0]}')">${ic(t[2],20)}${t[1]}</button>`).join('')}</div></div></div>`:'';
   const views={home:viewHome,calendar:viewCalendar,courses:viewCourses,sessions:viewSessions,events:viewEvents,money:viewMoney,school:viewSchool,holidays:viewHolidays,freetime:viewFreeTime,circles:viewCircles,groups:viewGroups,progress:viewProgress,people:viewPeople,settings:viewSettings};
   const canAlerts=!isTeacher();
-  const demoNote=S.mode==='demo'&&!isTeacher()?`<div class="small muted" style="padding:0 12px 10px">Demo family · <a href="#" style="color:inherit" onclick="event.preventDefault();leaveDemoForSetup()">Set up my family</a></div>`:'';
+  const demoNote=S.mode==='demo'&&!isTeacher()?`<div class="small muted" style="padding:0 12px 10px">Demo family · <a href="#" style="color:inherit" onclick="event.preventDefault();leaveDemoForSetup()">Set up my family</a>${SBU?` · <a href="#" style="color:inherit" onclick="event.preventDefault();backToFamily()">Back to my family</a>`:''}</div>`:'';
   $('app').innerHTML=`<div class="app"><aside class="side"><div class="brand"><i></i>Homeroom</div>${demoNote}${side}<div style="flex:1"></div>${isAdmin()?householdSelect():''}${viewAsSelect()}
   <div style="display:flex;gap:6px;margin-top:8px"><button class="btn sm" style="flex:1" onclick="openModal({type:'help'})">${ic('help',15)} Help</button><button class="btn sm" style="flex:1" onclick="openModal({type:'protoFeedback'})">${ic('mega',15)} Feedback</button></div></aside>
   <main class="main"><div class="wrap">
   <div class="top"><h1 class="grow">${cur[1]}</h1><button class="x" style="background:none;border:1px solid var(--line)" onclick="openModal({type:'help'})" aria-label="Help">${ic('help',18)}</button>${canAlerts?`<button class="btn" onclick="openModal({type:'alerts'})" aria-label="Alerts">${ic('bell',18)}${notes.length?`<b>${notes.length}</b>`:''}</button>`:''}<div class="mob-only" id="mob-va">${isAdmin()?householdSelect():''}${viewAsSelect()}</div></div>
-  ${S.mode==='demo'&&!isTeacher()?`<div class="mob-only small muted" style="margin:-8px 0 12px">You're exploring a demo family · <a href="#" style="color:inherit" onclick="event.preventDefault();leaveDemoForSetup()">Set up my family</a></div>`:''}
+  ${S.mode==='demo'&&!isTeacher()?`<div class="mob-only small muted" style="margin:-8px 0 12px">You're exploring a demo family · <a href="#" style="color:inherit" onclick="event.preventDefault();leaveDemoForSetup()">Set up my family</a>${SBU?` · <a href="#" style="color:inherit" onclick="event.preventDefault();backToFamily()">Back to my family</a>`:''}</div>`:''}
   ${storageOK?'':`<div class="banner info">${ic('alert')}<div>Changes are kept only while this page stays open — browser storage isn’t available here. A real backend will fix this.</div></div>`}
   ${views[ui.tab]?views[ui.tab]():emptyMsg('Not available.')}</div></main><nav class="bnav" aria-label="Main">${bn}</nav></div>${moreSheet}`;
   if(!S.helpSeen&&!ui.modal){S.helpSeen=true;persist();openModal({type:'quickstart',step:0})}
@@ -1189,7 +1193,7 @@ function viewSchool(){
   }
   if(isAdmin()&&people.length>1){
     const shared=sharedSchoolBreaks(people.map(p=>p.id));
-    if(shared.length)h+=sec('Shared breaks','users',shared.map(w=>`<div class="li"><div class="grow small"><b>Shared school break</b>: ${fmtD(w.from)} – ${fmtD(w.to)}</div></div></div>`).join(''));
+    if(shared.length)h+=sec('Shared breaks','users',shared.map(w=>`<div class="li"><div class="grow small"><b>Shared school break</b>: ${fmtD(w.from)} – ${fmtD(w.to)}</div></div>`).join(''));
   }
   return h;
 }
@@ -1300,7 +1304,7 @@ function viewCircles(){
     const mine=circleHH(cir,CH);
     h+=`<div class="card" style="margin-bottom:14px"><div class="sec-h"><h3>${ic('building',18)} ${esc(cir.name)}</h3>${mine?`<span class="badge ${mine.paused?'':'st-ok'}">${mine.paused?'Paused':'Active'}</span>`:''}</div>
     <div class="small muted" style="margin-bottom:8px">${cir.households.length} households</div>
-    <div class="list">${cir.households.map(h2=>{const hh=household(h2.householdId),isMe=h2.householdId===CH;return `<div class="li"><div class="grow"><b>${esc(hh.name)}${isMe?' (you)':''}</b><div class="small muted">Sharing: ${h2.sharingLevel==='freebusy'?'Free/Busy only':h2.sharingLevel==='limited'?'Limited general info':'No sharing'}${h2.paused?' · paused':''}</div></div>${isMe&&isAdmin()?`<button class="btn sm" onclick="openModal({type:'circleSettings',id:'${cir.id}'})">${ic('edit',14)} Settings</button>`:''}</div>`}).join('')}</div>
+    <div class="list">${cir.households.map(h2=>{const hh=household(h2.householdId),isMe=h2.householdId===CH;return `<div class="li"><div class="grow"><b>${esc((hh||{}).name||'Another household')}${isMe?' (you)':''}</b><div class="small muted">Sharing: ${h2.sharingLevel==='freebusy'?'Free/Busy only':h2.sharingLevel==='limited'?'Limited general info':'No sharing'}${h2.paused?' · paused':''}</div></div>${isMe&&isAdmin()?`<button class="btn sm" onclick="openModal({type:'circleSettings',id:'${cir.id}'})">${ic('edit',14)} Settings</button>`:''}</div>`}).join('')}</div>
     <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px"><button class="btn sm" onclick="openModal({type:'commonTime',id:'${cir.id}'})">${ic('clock',15)} Find common time</button><button class="btn sm" onclick="openModal({type:'commonBreak',id:'${cir.id}'})">${ic('sun',15)} Find common break</button></div>
     ${circleSharedPlans(cir.id).length?`<h3 style="margin:14px 0 4px">Shared plans</h3>${circleSharedPlans(cir.id).map(sp=>sharedPlanRow(sp)).join('')}`:''}
     </div>`;
@@ -1337,7 +1341,7 @@ function groupDetail(g){
   <div style="display:flex;flex-wrap:wrap;gap:6px">${g.members.map(m=>`<span class="gmember">${m.role==='teacher'?ic('users',13):`<i class="dot" style="--pc:${pc(m.personId)}"></i>`}${esc(groupMemberLabel(m))}</span>`).join('')}</div></div>`;
   h+=sec('Announcements','mega',g.announcements.length?g.announcements.slice().reverse().map(a=>`<div class="li" style="align-items:flex-start"><div class="grow"><b>${esc(a.title)}</b>${a.kind==='schedule'?` <span class="badge st-up">${ic('swap',12)} Schedule update</span>`:''}<div class="small">${esc(a.message)}</div><div class="tiny muted" style="margin-top:2px">${esc(a.author)} · ${fmtD(a.ts.slice(0,10))}</div></div></div>`).join(''):emptyMsg('No announcements yet.'),(role==='teacher'&&g.settings.teacherCanPost)||(role==='parent'&&g.settings.parentsCanPost)?`<button class="btn sm" onclick="openModal({type:'groupAnnounce',id:'${g.id}'})">${ic('plus',14)} New</button>`:'');
   h+=sec('Shared assignments','note',g.sharedAssignments.length?g.sharedAssignments.slice().reverse().map(a=>assignmentBlock(g,a)).join(''):emptyMsg('No shared assignments yet.'),role==='teacher'?`<button class="btn sm" onclick="openModal({type:'groupAssign',id:'${g.id}'})">${ic('plus',14)} New</button>`:'');
-  if(g.materials.length)h+=sec('Shared materials','link2',g.materials.map(mt=>`<div class="li"><div class="grow small">${esc(mt.title)}</div>${mt.url?`<a class="btn sm" href="${esc(mt.url)}" target="_blank" rel="noopener">Open</a>`:''}</div>`).join(''));
+  if(g.materials.length)h+=sec('Shared materials','link2',g.materials.map(mt=>`<div class="li"><div class="grow small">${esc(mt.title)}</div>${safeUrl(mt.url)?`<a class="btn sm" href="${esc(safeUrl(mt.url))}" target="_blank" rel="noopener noreferrer">Open</a>`:''}</div>`).join(''));
   h+=groupChat(g,role);
   h+=`<div style="margin-top:10px"><button class="btn sm bad" onclick="confirmBox('Leave this Course Group?','Your personal course history, attendance, packages and homework all stay exactly as they are — only shared Group access is removed.','leaveGroup(\\'${g.id}\\')')">Leave group</button></div>`;
   return h;
@@ -1555,18 +1559,24 @@ function viewSettings(){
   <div class="fld"><label class="f">Week starts on</label><select onchange="S.settings.weekStart=+this.value;persist();render()">${[6,0,1].map(d=>`<option value="${d}" ${ws===d?'selected':''}>${['Sunday','Monday','','','','','Saturday'][d]}</option>`).join('')}</select></div>
   <div class="small muted">Sessions are generated ${S.settings.horizon||112} days ahead from each recurring schedule.</div>`)
   +sec('Data','note',`<p class="small">${cloudStatusText()}</p>
-  <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="confirmBox('Set up a new family?','This clears everything saved in this browser and opens the Welcome screen, where you can set up your own family or explore the demo.','restartOnboarding()')">Set up a new family</button><button class="btn" onclick="confirmBox('Reset demo data?','This replaces everything with the sample households (Hala, Omar, Sara). Your changes will be lost.','resetDemo()')">Reset demo data</button><button class="btn bad" onclick="confirmBox('Start with an empty app?','This removes all sample and entered data, leaving one admin profile.','clearAll()')">Clear all data</button><button class="btn" onclick="openModal({type:'export'})">Export JSON</button>${SBU?`<button class="btn" onclick="cloudSignOut()">Sign out</button>`:`<button class="btn" onclick="showAuth('in')">Sign in</button>`}</div>`)+`</div><div style="height:14px"></div>`
+  <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="confirmBox('Set up a new family?','This clears everything saved in this browser and opens the Welcome screen, where you can set up your own family or explore the demo.${acctNote()}','restartOnboarding()')">Set up a new family</button><button class="btn" onclick="confirmBox('Reset demo data?','This replaces everything with the sample households (Hala, Omar, Sara). Your changes will be lost.','resetDemo()')">Reset demo data</button><button class="btn bad" onclick="confirmBox('Start with an empty app?','This removes all sample and entered data, leaving one admin profile.${acctNote()}','clearAll()')">Clear all data</button><button class="btn" onclick="openModal({type:'export'})">Export JSON</button>${SBU?`<button class="btn" onclick="cloudSignOut()">Sign out</button>`:`<button class="btn" onclick="showAuth('in')">Sign in</button>`}</div>`)+`</div><div style="height:14px"></div>`
   +sec('Public holidays','flag',`<p class="small muted">Full year-by-year view, editing and Family Breaks planning has moved to <b>Holidays &amp; Breaks</b> in the main menu — this is just the quick admin list.</p><div class="list">${S.holidays.filter(h=>h.householdId===CH).sort((a,b)=>a.date.localeCompare(b.date)).map(h=>`<div class="li"><div class="grow"><b>${esc(h.name)}</b> ${holidayStatusBadge(h)}<div class="small muted">${fmtD(h.date)}${h.to&&h.to!==h.date?' – '+fmtD(h.to):''}</div></div><button class="btn sm" onclick="openModal({type:'holiday',id:'${h.id}'})">${ic('edit',14)}</button><button class="btn sm bad" onclick="deleteHoliday('${h.id}')">${ic('trash',14)}</button></div>`).join('')||emptyMsg('No holidays added yet.')}</div><button class="btn sm" style="margin-top:8px" onclick="openModal({type:'holiday'})">${ic('plus',14)} Add holiday</button>`)
   +sec('Parent permissions','users',hhPeople().filter(p=>p.role==='parent').map(p=>`<div class="li"><div class="grow"><b>${esc(p.name)}</b><div class="small muted">Sees: ${(p.childrenAccess||[]).map(id=>esc((person(id)||{}).name)).join(', ')||'nobody yet'} · ${p.financeAccess?'can see payments':'no financial access'}</div></div><button class="btn sm" onclick="openModal({type:'person',id:'${p.id}'})">${ic('edit',14)} Edit</button></div>`).join('')||emptyMsg('No separate Parent accounts yet — add one from People, with role “Parent”.'))
   +`<div style="height:14px"></div>`
-  +sec('Teacher access','lock',(()=>{const cs=hhCourses().filter(c=>c.teacherName);return cs.map(c=>`<div class="li"><div class="grow"><div class="b">${esc(c.name)}</div><div class="small muted">${esc(c.teacherName)} · ${c.teacherAccess?'Can see this course’s assigned students, feedback & private parent notes. No finances.':'No access'}</div></div>${c.teacherAccess?`<button class="btn sm bad" onclick="confirmBox('Revoke teacher access?','${esc(c.teacherName)} will no longer see ${esc(c.name)}. Feedback already recorded is kept for you.','setTeacherAccess(\\'${c.id}\\',false)')">Revoke</button>`:`<button class="btn sm" onclick="setTeacherAccess('${c.id}',true)">Enable</button>`}</div>`).join('')||emptyMsg('No teachers yet.')})())+`<div style="height:14px"></div>`
+  +sec('Teacher access','lock',(()=>{const cs=hhCourses().filter(c=>c.teacherName);return cs.map(c=>`<div class="li"><div class="grow"><div class="b">${esc(c.name)}</div><div class="small muted">${esc(c.teacherName)} · ${c.teacherAccess?'Can see this course’s assigned students, feedback & private parent notes. No finances.':'No access'}</div></div>${c.teacherAccess?`<button class="btn sm bad" onclick="askRevokeTeacher('${c.id}')">Revoke</button>`:`<button class="btn sm" onclick="setTeacherAccess('${c.id}',true)">Enable</button>`}</div>`).join('')||emptyMsg('No teachers yet.')})())+`<div style="height:14px"></div>`
   +sec('Who can see what','lock',`<div class="scroll"><table class="tb"><thead><tr><th></th><th>Admin</th><th>Parent</th><th>Member</th><th>Teacher</th></tr></thead><tbody>
   ${[['Household members & calendars','✓','Authorized children only','Own only','—'],['Prices, packages, payments','✓','If granted','—','—'],['Attendance & notes','✓','Authorized children','Own','Feedback only'],['Reschedule sessions','✓','Authorized children','If course allows','—'],['Teacher feedback','✓','Authorized children','Shared items','Assigned courses'],['Private parent note','✓','✓','—','✓'],['Other households’ data','—','—','—','—'],['Course Group membership','✓','✓','If invited','If invited'],['Settings & people','✓','—','—','—']].map(r=>`<tr><td>${r[0]}</td><td>${r[1]}</td><td>${r[2]}</td><td>${r[3]}</td><td>${r[4]}</td></tr>`).join('')}</tbody></table></div><div class="tiny muted" style="margin-top:8px">Use “View as” to try each role. Private by default, shared only by explicit permission — in a real app these rules are enforced by the server, not just the interface.</div>`);
 }
 function deleteHoliday(id){S.holidays=S.holidays.filter(h=>h.id!==id);persist();closeModal();toast('Holiday removed')}
+function askRevokeTeacher(cid){const c=course(cid);if(c)confirmBox('Revoke teacher access?',`${c.teacherName} will no longer see ${c.name}. Feedback already recorded is kept for you.`,`setTeacherAccess('${cid}',false)`)}
 function setTeacherAccess(cid,on){const c=course(cid);c.teacherAccess=on;if(on&&!c.teacherId){const t=S.teachers.find(t=>t.name.toLowerCase()===c.teacherName.toLowerCase())||(S.teachers.push({id:uid('t'),name:c.teacherName,phone:c.teacherPhone}),S.teachers[S.teachers.length-1]);c.teacherId=t.id}log('course',cid,`Teacher access ${on?'enabled':'revoked'} for ${c.teacherName}.`);persist();render();toast(on?'Teacher access enabled':'Teacher access revoked')}
 function resetDemo(){seed();V={kind:'admin',id:'p_hala'};ui.tab='home';closeConfirm();closeModal();render();toast('Demo data restored')}
-function clearAll(){CH='hh_x';S={seq:1,households:[{id:'hh_x',name:'My Family',country:'Egypt'}],people:[{id:'p_admin',name:'Admin',color:'#8A4DB8',role:'admin',active:true,householdId:'hh_x'}],teachers:[],courses:[],enrollments:[],schedules:[],sessions:[],packages:[],payments:[],feedback:[],audit:[],settings:{horizon:112,weekStart:0},tasks:[],events:[],schoolCalendars:[],schoolImports:[],holidays:[],circles:[],sharedPlans:[],courseGroups:[],protoFeedback:[],accounts:[],helpSeen:true,demoVersion:DEMO_VERSION,mode:'real'};V={kind:'admin',id:'p_admin'};persist();closeConfirm();ui.tab='home';render();toast('All data cleared')}
+async function clearAll(){
+  if(SBU&&S&&S.mode==='real'&&!(await cloudDeleteHousehold()))return;
+  setDirty(false);const hid='hh_'+Date.now().toString(36)+rnd(),pid='p_'+rnd()+rnd();CH=hid;
+  S={seq:1,households:[{id:hid,name:'My Family',country:'Egypt'}],people:[{id:pid,name:'Admin',color:'#8A4DB8',role:'admin',active:true,householdId:hid}],teachers:[],courses:[],enrollments:[],schedules:[],sessions:[],packages:[],payments:[],feedback:[],audit:[],settings:{horizon:112,weekStart:0},tasks:[],events:[],schoolCalendars:[],schoolImports:[],holidays:[],circles:[],sharedPlans:[],courseGroups:[],protoFeedback:[],accounts:[{id:uid('acct'),personId:pid,householdId:hid,role:'admin',createdOn:today()}],helpSeen:true,demoVersion:DEMO_VERSION,mode:'real'};
+  V={kind:'admin',id:pid};persist();closeConfirm();ui.tab='home';render();toast('All data cleared')
+}
 
 /* =====================================================================
    ACTIONS
@@ -2347,7 +2357,7 @@ function onbNext(){
 function commitHousehold(){
   const creating=!S;
   if(creating){
-    const hid='hh_'+Date.now().toString(36);
+    const hid='hh_'+Date.now().toString(36)+rnd();
     S={seq:1,households:[],people:[],accounts:[],teachers:[],courses:[],enrollments:[],schedules:[],sessions:[],packages:[],payments:[],feedback:[],audit:[],
        settings:{horizon:112,weekStart:0},tasks:[],events:[],schoolCalendars:[],schoolImports:[],holidays:[],circles:[],sharedPlans:[],courseGroups:[],protoFeedback:[],
        helpSeen:false,demoVersion:DEMO_VERSION,mode:'real',onboarding:{active:true,step:3,school:{}}};
@@ -2502,7 +2512,9 @@ function goToHomeroom(){
   render();toast(`Welcome, ${person(me).name} — your household is ready`);
 }
 function exploreDemo(){seed();CH='hh_hala';V={kind:'admin',id:'p_hala'};ui.tab='home';onb=freshOnb();render()}
-function restartOnboarding(){
+async function restartOnboarding(){
+  if(SBU&&S&&S.mode==='real'&&!(await cloudDeleteHousehold()))return;
+  setDirty(false);
   try{localStorage.removeItem(KEY)}catch(e){}
   S=null;onb=freshOnb();ui.modal=null;ui.tab='home';ui.more=false;closeConfirm();showWelcome();
 }
@@ -2517,8 +2529,13 @@ function leaveDemoForSetup(){confirmBox('Set up your own family?','This closes t
    ===================================================================== */
 const SB_URL='https://pqganolgbvbybnshabsu.supabase.co',SB_KEY='sb_publishable_oFub4oh-E28t7dcECz1_LQ_inErbOhg';
 let sb=null,SBU=null,authCtx={mode:'in',next:null};
-try{sb=window.supabase.createClient(SB_URL,SB_KEY)}catch(e){}
-const cloud={snap:{},status:'off',err:'',timer:null,busy:false,again:false,hid:null};
+try{sb=window.supabase.createClient(SB_URL,SB_KEY);sb.auth.onAuthStateChange((ev,session)=>{if(ev==='PASSWORD_RECOVERY'&&session){SBU=session.user;setTimeout(showNewPassword,0)}})}catch(e){}
+const DIRTY_KEY='homeroom.dirty';
+const cloudDirty=()=>{try{return localStorage.getItem(DIRTY_KEY)==='1'}catch(e){return false}};
+const setDirty=v=>{try{v?localStorage.setItem(DIRTY_KEY,'1'):localStorage.removeItem(DIRTY_KEY)}catch(e){}};
+const redirectUrl=()=>/^https?:/.test(location.protocol)?location.origin+location.pathname:undefined;
+const safeId=o=>o&&typeof o.id==='string'&&/^[\w.-]+$/.test(o.id);
+const cloud={snap:{},status:'off',err:'',timer:null,busy:false,again:false,hid:null,rev:0};
 const CMAP=[['people','people'],['teachers','teachers'],['courses','courses'],['enrollments','enrollments'],['schedules','schedules'],['sessions','sessions'],['feedback','feedback'],['tasks','tasks'],['events','events'],['schoolCalendars','school_calendars'],['schoolImports','school_imports'],['holidays','holidays'],['audit','audit'],['protoFeedback','proto_feedback'],['packages','packages'],['payments','payments']];
 const CSHARED=[['circles','circles'],['sharedPlans','shared_plans'],['courseGroups','course_groups']];
 const CALL=()=>[...CMAP.map(x=>[...x,false]),...CSHARED.map(x=>[...x,true])];
@@ -2547,7 +2564,7 @@ function cloudRows(col,shared,hid){
 }
 function cloudQueue(){
   if(!sb||!SBU||!S||S.mode!=='real'||!S.households.length)return;
-  clearTimeout(cloud.timer);cloud.timer=setTimeout(cloudSync,800);
+  cloud.rev++;setDirty(true);clearTimeout(cloud.timer);cloud.timer=setTimeout(cloudSync,800);
 }
 function setCloud(st,err){
   cloud.status=st;cloud.err=err||'';
@@ -2557,7 +2574,7 @@ function setCloud(st,err){
 async function cloudSync(){
   if(!sb||!SBU||!S||S.mode!=='real'||!S.households.length)return;
   if(cloud.busy){cloud.again=true;return}
-  cloud.busy=true;setCloud('syncing');
+  cloud.busy=true;const rev0=cloud.rev;setCloud('syncing');
   try{
     const h=S.households.find(x=>x.id===CH)||S.households[0],hid=h.id;
     if(cloud.hid!==hid){
@@ -2579,10 +2596,11 @@ async function cloudSync(){
       const prev=cloud.snap[tbl]||{},{next,rows}=cloudRows(col,shared,hid);
       const ups=rows.filter(r=>prev[r.id]!==next[r.id]),dels=Object.keys(prev).filter(id=>!(id in next));
       const stamp=new Date().toISOString();
-      for(let i=0;i<ups.length;i+=200){const {error}=await sb.from(tbl).upsert(ups.slice(i,i+200).map(r=>({...r,updated_at:stamp})));if(error)throw error}
-      for(let i=0;i<dels.length;i+=200){const {error}=await sb.from(tbl).delete().in('id',dels.slice(i,i+200));if(error)throw error}
+      for(let i=0;i<ups.length;i+=200){const {error}=await sb.from(tbl).upsert(ups.slice(i,i+200).map(r=>({...r,updated_at:stamp})),{onConflict:shared?'id':'household_id,id'});if(error)throw error}
+      for(let i=0;i<dels.length;i+=200){let q=sb.from(tbl).delete();if(!shared)q=q.eq('household_id',hid);const {error}=await q.in('id',dels.slice(i,i+200));if(error)throw error}
       cloud.snap[tbl]=next;
     }
+    if(rev0===cloud.rev)setDirty(false);
     setCloud('ok');
   }catch(e){console.error(e);setCloud('error',(e&&e.message)||String(e))}
   cloud.busy=false;
@@ -2605,8 +2623,8 @@ async function cloudLoad(){
   const ns={seq:Math.floor(Date.now()/1000),households:[{id:h.id,name:h.name,country:h.country,currency:h.currency,createdOn:today()}],
     settings:meta.settings||{horizon:112,weekStart:0},accounts:meta.accounts||[],helpSeen:!!meta.helpSeen,demoVersion:DEMO_VERSION,mode:'real'};
   if(meta.onboarding)ns.onboarding=meta.onboarding;
-  for(const [col,tbl] of CMAP)ns[col]=(await fetchAll(tbl,'household_id',h.id)).map(r=>r.data);
-  for(const [col,tbl] of CSHARED)ns[col]=(await fetchAll(tbl)).map(r=>r.data);
+  for(const [col,tbl] of CMAP)ns[col]=(await fetchAll(tbl,'household_id',h.id)).map(r=>r.data).filter(safeId);
+  for(const [col,tbl] of CSHARED)ns[col]=(await fetchAll(tbl)).map(r=>r.data).filter(safeId);
   const {data:mem}=await sb.from('household_members').select('person_id').eq('household_id',h.id).eq('user_id',SBU.id).maybeSingle();
   S=ns;CH=h.id;cloud.hid=h.id;cloud.snap={};
   CALL().forEach(([col,tbl,shared])=>{cloud.snap[tbl]=cloudRows(col,shared,h.id).next});
@@ -2616,7 +2634,21 @@ async function cloudLoad(){
   try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
   return true;
 }
-async function afterSignIn(){
+/* Decides between the browser copy and the account copy. Unsynced browser edits, or a family that
+   was never uploaded, win over the account copy so nothing is lost; otherwise the account copy loads. */
+async function afterSignIn(boot){
+  if(boot&&S&&S.mode==='demo')return true;                 // keep showing the demo the user opened
+  const localReal=S&&S.mode==='real'&&S.households.length;
+  if(localReal){
+    let keep=cloudDirty();
+    if(!keep){try{const {data}=await sb.from('households').select('id').eq('id',S.households[0].id).maybeSingle();keep=!data}catch(e){}}
+    if(keep){
+      CH=S.households[0].id;
+      const adm=hhPeople(CH).find(p=>p.role==='admin'&&p.active!==false);V={kind:'admin',id:adm?adm.id:null};
+      if(S.onboarding&&S.onboarding.active)onbFromS();
+      render();cloudQueue();return true;
+    }
+  }
   let loaded=false;
   try{loaded=await cloudLoad()}catch(e){console.error(e);setCloud('error',(e&&e.message)||String(e))}
   if(loaded){
@@ -2624,8 +2656,18 @@ async function afterSignIn(){
     if(S.onboarding&&S.onboarding.active)onbFromS();
     ui.tab='home';ui.modal=null;render();return true;
   }
-  if(S&&S.mode==='real'&&S.households.length){render();cloudQueue();return true}
   return false;
+}
+async function backToFamily(){
+  try{localStorage.removeItem(KEY)}catch(e){}
+  S=null;onb=freshOnb();ui.modal=null;ui.tab='home';
+  if(!(await afterSignIn(false)))showWelcome();
+}
+async function cloudDeleteHousehold(){
+  if(!sb||!SBU||!cloud.hid)return true;
+  const {error}=await sb.from('households').delete().eq('id',cloud.hid);
+  if(error){toast('Could not delete the copy saved in your account: '+error.message,'warn');return false}
+  cloud.hid=null;cloud.snap={};return true;
 }
 function cloudStatusText(){
   if(S&&S.mode==='real'&&SBU){
@@ -2637,9 +2679,34 @@ function cloudStatusText(){
 }
 async function cloudSignOut(){
   try{if(sb)await sb.auth.signOut()}catch(e){}
-  SBU=null;cloud.hid=null;cloud.snap={};
+  SBU=null;cloud.hid=null;cloud.snap={};setDirty(false);
   try{localStorage.removeItem(KEY)}catch(e){}
   S=null;onb=freshOnb();ui.modal=null;ui.tab='home';closeConfirm();showWelcome();
+}
+async function authForgot(){
+  const email=$('au-email').value.trim(),box=$('au-err');
+  const msg=(m,k)=>{box.innerHTML=`<div class="banner ${k||'bad'}" style="margin:12px 0 0">${ic(k==='info'?'bell':'alert',18)}<div class="small">${esc(m)}</div></div>`};
+  if(!sb)return msg('Password reset is unavailable: the Supabase library could not be loaded.');
+  if(!email)return msg('Type your email above first, then choose Forgot my password.');
+  const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:redirectUrl()});
+  if(error)return msg(error.message);
+  msg('If that email has an account, a reset link is on its way. Open it on this device.','info');
+}
+function showNewPassword(){
+  $('modal-root').innerHTML='';
+  $('app').innerHTML=`<div class="welcome"><div class="card"><div class="brand" style="padding:0"><i></i>Homeroom</div>
+    <h1>Choose a new password</h1>
+    <div class="fld"><label class="f" for="np-pw">New password (8+ characters)</label><input type="password" id="np-pw" autocomplete="new-password" onkeydown="if(event.key==='Enter')saveNewPassword()"></div>
+    <div id="au-err" role="alert"></div>
+    <div class="choices" style="margin-top:14px"><button class="btn pri" onclick="saveNewPassword()">Save password</button></div></div></div>`;
+}
+async function saveNewPassword(){
+  const pw=$('np-pw').value,box=$('au-err');
+  if(pw.length<8){box.innerHTML=`<div class="banner bad" style="margin:12px 0 0">${ic('alert',18)}<div class="small">Use at least 8 characters.</div></div>`;return}
+  const {error}=await sb.auth.updateUser({password:pw});
+  if(error){box.innerHTML=`<div class="banner bad" style="margin:12px 0 0">${ic('alert',18)}<div class="small">${esc(error.message)}</div></div>`;return}
+  history.replaceState(null,'',location.pathname);
+  if(!(await afterSignIn(false)))showWelcome();
 }
 function startSetup(){if(SBU)onbGo(1);else showAuth('up','setup')}
 function showAuth(mode,next){
@@ -2654,20 +2721,20 @@ function showAuth(mode,next){
     <div id="au-err" role="alert"></div>
     <div class="choices" style="margin-top:14px"><button class="btn pri" onclick="authSubmit()">${up?'Create account':'Sign in'}</button>
       <button class="btn" onclick="showAuth('${up?'in':'up'}',${authCtx.next?`'${authCtx.next}'`:'null'})">${up?'I already have an account':'Create a new account'}</button>
-      <button class="btn" onclick="onb=freshOnb();showWelcome()">Back</button></div></div></div>`;
+      <button class="btn" onclick="onb=freshOnb();showWelcome()">Back</button>${up?'':`<button class="btn" onclick="authForgot()">Forgot my password</button>`}</div></div></div>`;
   const f=$('au-email');if(f)f.focus();
 }
 async function authSubmit(){
   const email=$('au-email').value.trim(),pw=$('au-pw').value,box=$('au-err');
   const msg=(m,k)=>{box.innerHTML=`<div class="banner ${k||'bad'}" style="margin:12px 0 0">${ic(k==='info'?'bell':'alert',18)}<div class="small">${esc(m)}</div></div>`};
   if(!sb)return msg('Sign-in is unavailable: the Supabase library could not be loaded.');
-  if(!email||pw.length<6)return msg('Enter your email and a password of at least 6 characters.');
+  if(!email||pw.length<8)return msg('Enter your email and a password of at least 8 characters.');
   const up=authCtx.mode==='up';
-  const r=up?await sb.auth.signUp({email,password:pw}):await sb.auth.signInWithPassword({email,password:pw});
+  const r=up?await sb.auth.signUp({email,password:pw,options:{emailRedirectTo:redirectUrl()}}):await sb.auth.signInWithPassword({email,password:pw});
   if(r.error)return msg(r.error.message);
   if(!r.data.session){authCtx.mode='in';return msg('Check your email to confirm your account, then come back and sign in.','info')}
   SBU=r.data.session.user;
-  if(await afterSignIn())return;
+  if(await afterSignIn(false))return;
   if(authCtx.next==='setup')onbGo(1);else showWelcome();
 }
 
@@ -2677,7 +2744,7 @@ async function authSubmit(){
 (function boot(){
   const st=document.createElement('style');st.textContent='.mob-only{display:block}@media(min-width:900px){.mob-only{display:none}}.mob-only .viewas select{max-width:150px}';document.head.appendChild(st);
   S=loadState();
-  if(!S){showWelcome();if(sb)sb.auth.getSession().then(({data})=>{SBU=data.session?data.session.user:null;if(SBU)afterSignIn().then(ok=>{if(!ok)showWelcome()})});return}                                   // first launch: Welcome screen, nothing seeded
+  if(!S){showWelcome();if(sb)sb.auth.getSession().then(({data})=>{SBU=data.session?data.session.user:null;if(SBU)afterSignIn(true).then(ok=>{if(!ok)showWelcome()})});return}                                   // first launch: Welcome screen, nothing seeded
   if(!S.mode)S.mode=S.households.some(h=>h.id==='hh_hala')?'demo':'real';   // browsers with saved V2 data
   S.settings=S.settings||{horizon:112,weekStart:0};
   upgradeDemo();
@@ -2686,7 +2753,7 @@ async function authSubmit(){
   const adm=hhPeople(CH).find(p=>p.role==='admin'&&p.active!==false)||S.people.find(p=>p.role==='admin'&&p.active!==false);V={kind:'admin',id:adm?adm.id:null};
   if(S.onboarding&&S.onboarding.active)onbFromS();
   render();
-  if(sb)sb.auth.getSession().then(({data})=>{SBU=data.session?data.session.user:null;if(SBU)afterSignIn()});
+  if(sb)sb.auth.getSession().then(({data})=>{SBU=data.session?data.session.user:null;if(SBU)afterSignIn(true)});
 })();
 </script>
 </body>
