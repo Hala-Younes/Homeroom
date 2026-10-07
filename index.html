@@ -373,6 +373,7 @@ function makeSession(c,sch,date){
     covered:'',homework:'',notes:'',reminder:'',edited:false,rescheduledFromId:null,rootId:null,replacedById:null,cancelReason:'',requestedBy:'',needsMakeup:false,cancelledOn:null};
 }
 function syncSessions(){
+  if(S.mode==='real'&&cloud.role&&!['admin','parent'].includes(cloud.role))return;
   const to=addDays(today(),S.settings.horizon||112),keys=new Set(S.sessions.map(s=>s.slotKey).filter(Boolean));
   S.schedules.forEach(sch=>{
     const c=course(sch.courseId);if(!c||c.status!=='Active')return;
@@ -926,15 +927,17 @@ function viewerOptions(){
   S.teachers.forEach(t=>{if(S.courses.some(c=>c.householdId===CH&&c.teacherId===t.id)||S.courseGroups.some(g=>g.members.some(m=>m.refId===t.id)))o.push([`teacher:${t.id}`,`${t.name} — Teacher`])});return o;
 }
 function viewAsSelect(){
+  if(lockedRole())return `<div class="small muted" style="padding:0 4px">${esc(viewerLabel())} · <a href="#" style="color:inherit" onclick="event.preventDefault();cloudSignOut()">Sign out</a></div>`;
   const cur=`${V.kind==='parent'?'parent':V.kind}:${V.id}`;
   return `<label class="viewas">${ic('users',16)} View as <select onchange="setViewer(this.value)" aria-label="View as">${viewerOptions().map(([v,l])=>`<option value="${v}" ${v===cur?'selected':''}>${esc(l)}</option>`).join('')}</select></label>`;
 }
 function householdSelect(){
+  if(lockedRole())return '';
   if(S.households.length<2)return '';
   return `<label class="hhsel">${ic('building',15)} Household <select onchange="setHousehold(this.value)" aria-label="Household">${S.households.map(h=>`<option value="${h.id}" ${h.id===CH?'selected':''}>${esc(h.name)}</option>`).join('')}</select></label>`;
 }
 function setHousehold(hid){CH=hid;const adm=hhPeople(hid).find(p=>p.role==='admin');V={kind:'admin',id:adm?adm.id:hhPeople(hid)[0].id};ui.tab='home';render()}
-function setViewer(v){const [k,id]=v.split(':');V={kind:k,id};if(!tabsFor().some(t=>t[0]===ui.tab))ui.tab='home';ui.sess.person='all';ui.cal.person='all';ui.prog.person=null;render()}
+function setViewer(v){if(lockedRole())return;const [k,id]=v.split(':');V={kind:k,id};if(!tabsFor().some(t=>t[0]===ui.tab))ui.tab='home';ui.sess.person='all';ui.cal.person='all';ui.prog.person=null;render()}
 function render(){
   if(!S)return;
   if(S.onboarding&&S.onboarding.active){showWelcome();return}
@@ -1560,6 +1563,7 @@ function viewSettings(){
   <div class="small muted">Sessions are generated ${S.settings.horizon||112} days ahead from each recurring schedule.</div>`)
   +sec('Data','note',`<p class="small">${cloudStatusText()}</p>
   <div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn" onclick="confirmBox('Set up a new family?','This clears everything saved in this browser and opens the Welcome screen, where you can set up your own family or explore the demo.${acctNote()}','restartOnboarding()')">Set up a new family</button><button class="btn" onclick="confirmBox('Reset demo data?','This replaces everything with the sample households (Hala, Omar, Sara). Your changes will be lost.','resetDemo()')">Reset demo data</button><button class="btn bad" onclick="confirmBox('Start with an empty app?','This removes all sample and entered data, leaving one admin profile.${acctNote()}','clearAll()')">Clear all data</button><button class="btn" onclick="openModal({type:'export'})">Export JSON</button>${SBU?`<button class="btn" onclick="cloudSignOut()">Sign out</button>`:`<button class="btn" onclick="showAuth('in')">Sign in</button>`}</div>`)+`</div><div style="height:14px"></div>`
+  +(accessSection()?accessSection()+`<div style="height:14px"></div>`:'')
   +sec('Public holidays','flag',`<p class="small muted">Full year-by-year view, editing and Family Breaks planning has moved to <b>Holidays &amp; Breaks</b> in the main menu — this is just the quick admin list.</p><div class="list">${S.holidays.filter(h=>h.householdId===CH).sort((a,b)=>a.date.localeCompare(b.date)).map(h=>`<div class="li"><div class="grow"><b>${esc(h.name)}</b> ${holidayStatusBadge(h)}<div class="small muted">${fmtD(h.date)}${h.to&&h.to!==h.date?' – '+fmtD(h.to):''}</div></div><button class="btn sm" onclick="openModal({type:'holiday',id:'${h.id}'})">${ic('edit',14)}</button><button class="btn sm bad" onclick="deleteHoliday('${h.id}')">${ic('trash',14)}</button></div>`).join('')||emptyMsg('No holidays added yet.')}</div><button class="btn sm" style="margin-top:8px" onclick="openModal({type:'holiday'})">${ic('plus',14)} Add holiday</button>`)
   +sec('Parent permissions','users',hhPeople().filter(p=>p.role==='parent').map(p=>`<div class="li"><div class="grow"><b>${esc(p.name)}</b><div class="small muted">Sees: ${(p.childrenAccess||[]).map(id=>esc((person(id)||{}).name)).join(', ')||'nobody yet'} · ${p.financeAccess?'can see payments':'no financial access'}</div></div><button class="btn sm" onclick="openModal({type:'person',id:'${p.id}'})">${ic('edit',14)} Edit</button></div>`).join('')||emptyMsg('No separate Parent accounts yet — add one from People, with role “Parent”.'))
   +`<div style="height:14px"></div>`
@@ -1573,7 +1577,7 @@ function setTeacherAccess(cid,on){const c=course(cid);c.teacherAccess=on;if(on&&
 function resetDemo(){seed();V={kind:'admin',id:'p_hala'};ui.tab='home';closeConfirm();closeModal();render();toast('Demo data restored')}
 async function clearAll(){
   if(SBU&&S&&S.mode==='real'&&!(await cloudDeleteHousehold()))return;
-  setDirty(false);const hid='hh_'+Date.now().toString(36)+rnd(),pid='p_'+rnd()+rnd();CH=hid;
+  setDirty(false);clearViewer();const hid='hh_'+Date.now().toString(36)+rnd(),pid='p_'+rnd()+rnd();CH=hid;
   S={seq:1,households:[{id:hid,name:'My Family',country:'Egypt'}],people:[{id:pid,name:'Admin',color:'#8A4DB8',role:'admin',active:true,householdId:hid}],teachers:[],courses:[],enrollments:[],schedules:[],sessions:[],packages:[],payments:[],feedback:[],audit:[],settings:{horizon:112,weekStart:0},tasks:[],events:[],schoolCalendars:[],schoolImports:[],holidays:[],circles:[],sharedPlans:[],courseGroups:[],protoFeedback:[],accounts:[{id:uid('acct'),personId:pid,householdId:hid,role:'admin',createdOn:today()}],helpSeen:true,demoVersion:DEMO_VERSION,mode:'real'};
   V={kind:'admin',id:pid};persist();closeConfirm();ui.tab='home';render();toast('All data cleared')
 }
@@ -1610,7 +1614,7 @@ function shell(title,body,wide,sub){return `<div class="ov" onclick="closeModal(
 function renderModal(){
   const m=ui.modal;if(!m){$('modal-root').innerHTML='';return}
   const scr=document.querySelector('#modal-root .sheet');const st=scr?scr.scrollTop:0;
-  const fn={session:mSession,course:mCourse,payment:mPayment,person:mPerson,reschedule:mReschedule,cancel:mCancel,editSession:mEditSession,addSession:mAddSession,attendanceList:mAttList,pickReschedule:mPick,adjust:mAdjust,alerts:mAlerts,export:mExport,pkgSessions:mPkgSessions,
+  const fn={invite:mInvite,session:mSession,course:mCourse,payment:mPayment,person:mPerson,reschedule:mReschedule,cancel:mCancel,editSession:mEditSession,addSession:mAddSession,attendanceList:mAttList,pickReschedule:mPick,adjust:mAdjust,alerts:mAlerts,export:mExport,pkgSessions:mPkgSessions,
     event:mEvent,holiday:mHoliday,schoolEntry:mSchoolEntry,schoolImport:mSchoolImport,circleSettings:mCircleSettings,commonTime:mCommonTime,commonBreak:mCommonBreak,sharedPlan:mSharedPlan,groupAnnounce:mGroupAnnounce,groupAssign:mGroupAssign,protoFeedback:mProtoFeedback,help:mHelp,quickstart:mQuickstart}[m.type];
   if(!fn){ui.modal=null;$('modal-root').innerHTML='';return}
   $('modal-root').innerHTML=fn(m);
@@ -2280,7 +2284,8 @@ function showWelcome(){
       <p class="lead">Organize your family's courses, school schedules, activities, payments and plans in one place.</p>
       <div class="choices"><button class="btn pri" onclick="startSetup()">${ic('users',18)} Set up my family</button>
       <button class="btn" onclick="exploreDemo()">${ic('home',18)} Explore a demo family</button>
-      ${SBU?'':`<button class="btn" onclick="showAuth('in')">${ic('lock',18)} Sign in to my account</button>`}</div>
+      ${SBU?'':`<button class="btn" onclick="showAuth('in')">${ic('lock',18)} Sign in to my account</button>`}
+      <button class="btn" onclick="showJoin()">${ic('link2',18)} I have an invite code</button></div>
       <p class="tiny muted" style="margin:18px 0 0">${SBU?`Signed in as ${esc(SBU.email||'')}. <a href="#" onclick="cloudSignOut();return false">Sign out</a>. `:''}This is a prototype being tested. The demo stays in this browser; a family you set up is saved to your account.</p>
     </div></div>`;
     return;
@@ -2514,7 +2519,7 @@ function goToHomeroom(){
 function exploreDemo(){seed();CH='hh_hala';V={kind:'admin',id:'p_hala'};ui.tab='home';onb=freshOnb();render()}
 async function restartOnboarding(){
   if(SBU&&S&&S.mode==='real'&&!(await cloudDeleteHousehold()))return;
-  setDirty(false);
+  setDirty(false);clearViewer();
   try{localStorage.removeItem(KEY)}catch(e){}
   S=null;onb=freshOnb();ui.modal=null;ui.tab='home';ui.more=false;closeConfirm();showWelcome();
 }
@@ -2535,7 +2540,23 @@ const cloudDirty=()=>{try{return localStorage.getItem(DIRTY_KEY)==='1'}catch(e){
 const setDirty=v=>{try{v?localStorage.setItem(DIRTY_KEY,'1'):localStorage.removeItem(DIRTY_KEY)}catch(e){}};
 const redirectUrl=()=>/^https?:/.test(location.protocol)?location.origin+location.pathname:undefined;
 const safeId=o=>o&&typeof o.id==='string'&&/^[\w.-]+$/.test(o.id);
-const cloud={snap:{},status:'off',err:'',timer:null,busy:false,again:false,hid:null,rev:0};
+const cloud={snap:{},status:'off',err:'',timer:null,busy:false,again:false,hid:null,rev:0,role:null,fin:false,access:null};
+const VIEWER_KEY='homeroom.viewer',INVITE_KEY='homeroom.invite';
+const lockedRole=()=>!!(S&&S.mode==='real'&&cloud.role&&cloud.role!=='admin');
+/* Tables each role may write (the database enforces this too); admins may write everything. */
+const CWRITE={parent:['sessions','tasks','events','school_calendars','school_imports','audit','proto_feedback','circles','shared_plans','course_groups'],
+  member:['sessions','tasks','events','audit','proto_feedback'],teacher:['sessions','feedback','audit','proto_feedback']};
+function canWriteTbl(tbl){
+  const r=cloud.role||'admin';if(r==='admin')return true;
+  if(r==='parent'&&cloud.fin&&(tbl==='packages'||tbl==='payments'))return true;
+  return (CWRITE[r]||[]).includes(tbl);
+}
+function restoreViewer(){
+  try{const v=JSON.parse(localStorage.getItem(VIEWER_KEY)||'null');
+    if(v&&S&&S.mode==='real'&&S.households[0]&&v.hid===S.households[0].id&&v.role){cloud.role=v.role;cloud.fin=!!v.fin;cloud.hid=null;V={kind:v.kind,id:v.id}}}catch(e){}
+}
+const pendingInvite=()=>{try{return sessionStorage.getItem(INVITE_KEY)||''}catch(e){return ''}};
+const clearViewer=()=>{cloud.role=null;cloud.fin=false;cloud.access=null;try{localStorage.removeItem(VIEWER_KEY)}catch(e){}};
 const CMAP=[['people','people'],['teachers','teachers'],['courses','courses'],['enrollments','enrollments'],['schedules','schedules'],['sessions','sessions'],['feedback','feedback'],['tasks','tasks'],['events','events'],['schoolCalendars','school_calendars'],['schoolImports','school_imports'],['holidays','holidays'],['audit','audit'],['protoFeedback','proto_feedback'],['packages','packages'],['payments','payments']];
 const CSHARED=[['circles','circles'],['sharedPlans','shared_plans'],['courseGroups','course_groups']];
 const CALL=()=>[...CMAP.map(x=>[...x,false]),...CSHARED.map(x=>[...x,true])];
@@ -2577,6 +2598,7 @@ async function cloudSync(){
   cloud.busy=true;const rev0=cloud.rev;setCloud('syncing');
   try{
     const h=S.households.find(x=>x.id===CH)||S.households[0],hid=h.id;
+    if(cloud.hid!==hid&&cloud.role&&cloud.role!=='admin')cloud.hid=hid;
     if(cloud.hid!==hid){
       const {data:ex,error:e0}=await sb.from('households').select('id').eq('id',hid).maybeSingle();if(e0)throw e0;
       if(!ex){
@@ -2588,17 +2610,27 @@ async function cloudSync(){
     }
     const meta={settings:S.settings,accounts:S.accounts,helpSeen:S.helpSeen,onboarding:S.onboarding||null};
     const hs=JSON.stringify([h.name,h.country,h.currency,meta]);
-    if(cloud.snap.__hh!==hs){
+    if(!lockedRole()&&cloud.snap.__hh!==hs){
       const {error}=await sb.from('households').update({name:h.name||'My family',country:h.country||null,currency:h.currency||null,settings:meta}).eq('id',hid);if(error)throw error;
       cloud.snap.__hh=hs;
     }
+    let firstErr=null,peopleChanged=false;
     for(const [col,tbl,shared] of CALL()){
       const prev=cloud.snap[tbl]||{},{next,rows}=cloudRows(col,shared,hid);
-      const ups=rows.filter(r=>prev[r.id]!==next[r.id]),dels=Object.keys(prev).filter(id=>!(id in next));
-      const stamp=new Date().toISOString();
-      for(let i=0;i<ups.length;i+=200){const {error}=await sb.from(tbl).upsert(ups.slice(i,i+200).map(r=>({...r,updated_at:stamp})),{onConflict:shared?'id':'household_id,id'});if(error)throw error}
-      for(let i=0;i<dels.length;i+=200){let q=sb.from(tbl).delete();if(!shared)q=q.eq('household_id',hid);const {error}=await q.in('id',dels.slice(i,i+200));if(error)throw error}
-      cloud.snap[tbl]=next;
+      if(!canWriteTbl(tbl)){cloud.snap[tbl]=next;continue}
+      try{
+        const ups=rows.filter(r=>prev[r.id]!==next[r.id]),dels=Object.keys(prev).filter(id=>!(id in next));
+        const stamp=new Date().toISOString();
+        for(let i=0;i<ups.length;i+=200){const {error}=await sb.from(tbl).upsert(ups.slice(i,i+200).map(r=>({...r,updated_at:stamp})),{onConflict:shared?'id':'household_id,id'});if(error)throw error}
+        for(let i=0;i<dels.length;i+=200){let q=sb.from(tbl).delete();if(!shared)q=q.eq('household_id',hid);const {error}=await q.in('id',dels.slice(i,i+200));if(error)throw error}
+        cloud.snap[tbl]=next;if(tbl==='people'&&(ups.length||dels.length))peopleChanged=true;
+      }catch(e){if(!firstErr)firstErr=e}
+    }
+    if(firstErr)throw firstErr;
+    // a parent's finance permission lives on their person profile; keep the account's database permission in step
+    if(peopleChanged&&!lockedRole()){
+      try{const {data:ms}=await sb.from('household_members').select('user_id,person_id,finance_access').eq('household_id',hid).eq('role','parent');
+        for(const m of ms||[]){const p=person(m.person_id);if(p&&!!p.financeAccess!==!!m.finance_access)await sb.from('household_members').update({finance_access:!!p.financeAccess}).eq('household_id',hid).eq('user_id',m.user_id)}}catch(e){}
     }
     if(rev0===cloud.rev)setDirty(false);
     setCloud('ok');
@@ -2617,28 +2649,35 @@ async function fetchAll(tbl,col,val){
 }
 /* Loads the user's newest household from Supabase into S. Returns true when one existed. */
 async function cloudLoad(){
-  const {data:hhs,error}=await sb.from('households').select('*').order('created_at',{ascending:false});if(error)throw error;
-  if(!hhs.length)return false;
-  const h=hhs[0],meta=h.settings||{};
+  const {data:mems,error}=await sb.from('household_members').select('household_id,role,person_id,teacher_id,finance_access,created_at').eq('user_id',SBU.id).order('created_at',{ascending:false});if(error)throw error;
+  if(!mems.length)return false;
+  const m=mems[0];
+  const {data:h,error:e2}=await sb.from('households').select('*').eq('id',m.household_id).single();if(e2)throw e2;
+  const meta=h.settings||{};
   const ns={seq:Math.floor(Date.now()/1000),households:[{id:h.id,name:h.name,country:h.country,currency:h.currency,createdOn:today()}],
     settings:meta.settings||{horizon:112,weekStart:0},accounts:meta.accounts||[],helpSeen:!!meta.helpSeen,demoVersion:DEMO_VERSION,mode:'real'};
-  if(meta.onboarding)ns.onboarding=meta.onboarding;
-  for(const [col,tbl] of CMAP)ns[col]=(await fetchAll(tbl,'household_id',h.id)).map(r=>r.data).filter(safeId);
+  if(meta.onboarding&&m.role==='admin')ns.onboarding=meta.onboarding;
+  for(const [col,tbl] of CMAP){
+    let rows;
+    if(tbl==='feedback'&&m.role==='member'){const r=await sb.rpc('member_feedback',{hid:h.id});if(r.error)throw r.error;rows=r.data||[]}
+    else rows=await fetchAll(tbl,'household_id',h.id);
+    ns[col]=rows.map(r=>r.data).filter(safeId);
+  }
   for(const [col,tbl] of CSHARED)ns[col]=(await fetchAll(tbl)).map(r=>r.data).filter(safeId);
-  const {data:mem}=await sb.from('household_members').select('person_id').eq('household_id',h.id).eq('user_id',SBU.id).maybeSingle();
-  S=ns;CH=h.id;cloud.hid=h.id;cloud.snap={};
+  S=ns;CH=h.id;cloud.hid=h.id;cloud.snap={};cloud.role=m.role;cloud.fin=!!m.finance_access;cloud.access=null;
   CALL().forEach(([col,tbl,shared])=>{cloud.snap[tbl]=cloudRows(col,shared,h.id).next});
   cloud.snap.__hh=JSON.stringify([h.name,h.country,h.currency,{settings:S.settings,accounts:S.accounts,helpSeen:S.helpSeen,onboarding:S.onboarding||null}]);
-  const adm=(mem&&mem.person_id&&person(mem.person_id))||hhPeople(CH).find(p=>p.role==='admin'&&p.active!==false);
-  V={kind:'admin',id:adm?adm.id:null};
-  try{localStorage.setItem(KEY,JSON.stringify(S))}catch(e){}
+  if(m.role==='teacher')V={kind:'teacher',id:m.teacher_id};
+  else if(m.role==='parent'||m.role==='member')V={kind:m.role,id:m.person_id};
+  else{const adm=(m.person_id&&person(m.person_id))||hhPeople(CH).find(p=>p.role==='admin'&&p.active!==false);V={kind:'admin',id:adm?adm.id:null}}
+  try{localStorage.setItem(KEY,JSON.stringify(S));localStorage.setItem(VIEWER_KEY,JSON.stringify({kind:V.kind,id:V.id,role:m.role,fin:cloud.fin,hid:h.id}))}catch(e){}
   return true;
 }
 /* Decides between the browser copy and the account copy. Unsynced browser edits, or a family that
    was never uploaded, win over the account copy so nothing is lost; otherwise the account copy loads. */
 async function afterSignIn(boot){
   if(boot&&S&&S.mode==='demo')return true;                 // keep showing the demo the user opened
-  const localReal=S&&S.mode==='real'&&S.households.length;
+  const localReal=S&&S.mode==='real'&&S.households.length&&!lockedRole();
   if(localReal){
     let keep=cloudDirty();
     if(!keep){try{const {data}=await sb.from('households').select('id').eq('id',S.households[0].id).maybeSingle();keep=!data}catch(e){}}
@@ -2660,6 +2699,7 @@ async function afterSignIn(boot){
 }
 async function backToFamily(){
   try{localStorage.removeItem(KEY)}catch(e){}
+  clearViewer();
   S=null;onb=freshOnb();ui.modal=null;ui.tab='home';
   if(!(await afterSignIn(false)))showWelcome();
 }
@@ -2669,6 +2709,72 @@ async function cloudDeleteHousehold(){
   if(error){toast('Could not delete the copy saved in your account: '+error.message,'warn');return false}
   cloud.hid=null;cloud.snap={};return true;
 }
+/* ---- Settings → Sign-in access (admins): who can sign in, and invite codes ---- */
+async function cloudLoadAccess(){
+  if(!sb||!SBU||!cloud.hid||cloud.accessBusy)return;
+  cloud.accessBusy=true;
+  try{
+    const [m,i]=await Promise.all([
+      sb.from('household_members').select('user_id,role,person_id,teacher_id,email,finance_access').eq('household_id',cloud.hid),
+      sb.from('invites').select('code,role,person_id,teacher_id,label,expires_at').eq('household_id',cloud.hid).is('used_at',null).order('created_at',{ascending:false})]);
+    cloud.access={members:m.data||[],invites:i.data||[],err:(m.error||i.error||{}).message||''};
+  }catch(e){cloud.access={members:[],invites:[],err:(e&&e.message)||String(e)}}
+  cloud.accessBusy=false;
+  if(ui.tab==='settings'&&!ui.modal&&S)render();
+}
+const ROLE_LABEL={admin:'Admin / Parent',parent:'Parent',member:'Student',teacher:'Teacher'};
+function accessWho(m){return m.role==='teacher'?((S.teachers.find(t=>t.id===m.teacher_id)||{}).name||'Teacher'):((person(m.person_id)||{}).name||'')}
+function inviteLink(code){const b=redirectUrl();return b?`${b}?invite=${code}`:''}
+function accessSection(){
+  if(!(isAdmin()&&S.mode==='real'&&SBU&&!lockedRole()))return '';
+  if(!cloud.access){cloud.hid?cloudLoadAccess():cloudQueue();return sec('Sign-in access','lock','<p class="small muted">Loading…</p>')}
+  const a=cloud.access;
+  const body=(a.err?`<div class="banner bad">${ic('alert',18)}<div class="small">${esc(a.err)}</div></div>`:'')+
+    `<p class="small muted">Invite a family member or teacher to sign in with their own account. They only see what their role allows.</p>
+    <div class="list">${a.members.map(m=>`<div class="li"><div class="grow"><b>${esc(m.email||'—')}</b><div class="small muted">${ROLE_LABEL[m.role]||m.role}${accessWho(m)?' · '+esc(accessWho(m)):''}${m.role==='parent'?(m.finance_access?' · can see payments':' · no finance'):''}</div></div>${m.user_id===SBU.id?'<span class="badge">You</span>':`<button class="btn sm bad" onclick="confirmBox('Remove sign-in access?','This account will no longer be able to open this family. Their profile and history stay.','removeAccess(\\'${m.user_id}\\')')">Remove</button>`}</div>`).join('')}</div>
+    ${a.invites.length?`<h3 style="margin:14px 0 4px">Waiting to be used</h3><div class="list">${a.invites.map(i=>`<div class="li"><div class="grow"><b>${esc(i.label||'')}</b> <span class="badge">${ROLE_LABEL[i.role]||i.role}</span><div class="small muted">Code <b>${esc(i.code)}</b> · expires ${fmtD(i.expires_at.slice(0,10))}</div></div><button class="btn sm" onclick="openModal({type:'invite',code:'${i.code}'})">Show</button><button class="btn sm bad" onclick="revokeInvite('${i.code}')">${ic('trash',14)}</button></div>`).join('')}</div>`:''}
+    <button class="btn pri" style="margin-top:10px" onclick="openModal({type:'invite'})">${ic('plus',16)} Invite someone</button>`;
+  return sec('Sign-in access','lock',body);
+}
+async function removeAccess(uid){
+  const {error}=await sb.from('household_members').delete().eq('household_id',cloud.hid).eq('user_id',uid);
+  closeConfirm();toast(error?'Could not remove: '+error.message:'Access removed',error?'warn':'');cloud.access=null;render();
+}
+async function revokeInvite(code){
+  const {error}=await sb.from('invites').delete().eq('code',code);
+  toast(error?'Could not revoke: '+error.message:'Invite revoked',error?'warn':'');cloud.access=null;render();
+}
+function mInvite(m){
+  if(m.code||m.created){
+    const code=m.code||m.created.code,link=inviteLink(code);
+    return shell('Invite code',`<p class="small">Share this with ${esc(m.created?m.created.label||'them':'them')}. It works once and expires in 7 days.</p>
+      <div class="card flat" style="text-align:center;margin-bottom:10px"><div class="big" style="letter-spacing:.12em">${esc(code)}</div></div>
+      ${link?`<div class="fld"><label class="f">Or send this link</label><input type="text" readonly value="${esc(link)}" onclick="this.select()"></div>`:''}
+      <p class="tiny muted">They open Homeroom, choose “I have an invite code”, create an account, and enter the code.</p>
+      <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" onclick="copyText('${esc(link||code)}')">Copy ${link?'link':'code'}</button><button class="btn pri" onclick="closeModal()">Done</button></div>`);
+  }
+  const taken=new Set((cloud.access?cloud.access.members:[]).map(x=>x.person_id||x.teacher_id));
+  const ppl=hhPeople().filter(p=>['member','parent'].includes(p.role)&&p.active!==false&&!taken.has(p.id));
+  const tch=S.teachers.filter(t=>!taken.has(t.id)&&hhCourses().some(c=>c.teacherId===t.id));
+  const noAcc=tch.filter(t=>!hhCourses().some(c=>c.teacherId===t.id&&c.teacherAccess));
+  const opts=[...ppl.map(p=>`<option value="p:${p.id}">${esc(p.name)} — ${p.role==='parent'?'Parent':'Student'}</option>`),...tch.map(t=>`<option value="t:${t.id}">${esc(t.name)} — Teacher</option>`)];
+  return shell('Invite someone',opts.length?`<div class="fld"><label class="f" for="iv-who">Who is this for?</label><select id="iv-who">${opts.join('')}</select></div>
+    <p class="tiny muted">Pick a person already added under People, or a teacher with a course. Students see only their own sessions and feedback; parents see what you allowed them; teachers see only courses where you turned on Teacher access (Settings).${noAcc.length?` Teacher access is currently off for: ${noAcc.map(t=>esc(t.name)).join(', ')}.`:''}</p>
+    <div id="iv-err" role="alert"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn" onclick="closeModal()">Cancel</button><button class="btn pri" onclick="createInvite()">Create invite code</button></div>`
+    :`<p class="small muted">Everyone is already invited or has an account. Add the person under People first (role Student or Parent), or add a course with a teacher.</p><div style="display:flex;justify-content:flex-end"><button class="btn pri" onclick="closeModal()">Close</button></div>`);
+}
+async function createInvite(){
+  const err=m=>{$('iv-err').innerHTML=`<div class="banner bad" style="margin:10px 0">${ic('alert',18)}<div class="small">${esc(m)}</div></div>`};
+  if(!cloud.hid){cloudQueue();return err('Your family is still being saved to your account. Try again in a few seconds.')}
+  const v=$('iv-who').value,k=v[0],id=v.slice(2);
+  const row=k==='t'?{household_id:cloud.hid,role:'teacher',teacher_id:id,label:(S.teachers.find(t=>t.id===id)||{}).name||'Teacher'}
+    :{household_id:cloud.hid,role:person(id).role==='parent'?'parent':'member',person_id:id,finance_access:person(id).role==='parent'&&!!person(id).financeAccess,label:person(id).name};
+  const {data,error}=await sb.from('invites').insert(row).select().single();
+  if(error)return err(error.message);
+  cloud.access=null;ui.modal={type:'invite',created:data};renderModal();
+}
+function copyText(t){try{navigator.clipboard.writeText(t).then(()=>toast('Copied'),()=>toast('Select and copy it manually','warn'))}catch(e){toast('Select and copy it manually','warn')}}
 function cloudStatusText(){
   if(S&&S.mode==='real'&&SBU){
     const t={ok:'All changes saved.',syncing:'Saving…',error:'Last sync failed: '+esc(cloud.err),off:'Waiting to sync…'}[cloud.status]||'';
@@ -2679,7 +2785,7 @@ function cloudStatusText(){
 }
 async function cloudSignOut(){
   try{if(sb)await sb.auth.signOut()}catch(e){}
-  SBU=null;cloud.hid=null;cloud.snap={};setDirty(false);
+  SBU=null;cloud.hid=null;cloud.snap={};setDirty(false);clearViewer();
   try{localStorage.removeItem(KEY)}catch(e){}
   S=null;onb=freshOnb();ui.modal=null;ui.tab='home';closeConfirm();showWelcome();
 }
@@ -2708,6 +2814,30 @@ async function saveNewPassword(){
   history.replaceState(null,'',location.pathname);
   if(!(await afterSignIn(false)))showWelcome();
 }
+function showJoin(){
+  if(!SBU)return showAuth('up','join');
+  $('modal-root').innerHTML='';
+  const code=pendingInvite(),replace=S&&S.mode==='real'&&!lockedRole();
+  $('app').innerHTML=`<div class="welcome"><div class="card"><div class="brand" style="padding:0"><i></i>Homeroom</div>
+    <h1>Join a family</h1>
+    <p class="lead">Enter the invite code you were given by the family’s admin. Signed in as ${esc(SBU.email||'')}.</p>
+    <div class="fld"><label class="f" for="jn-code">Invite code</label><input type="text" id="jn-code" value="${esc(code)}" autocomplete="off" autocapitalize="characters" onkeydown="if(event.key==='Enter')joinWithCode()"></div>
+    ${replace?`<p class="tiny muted">This device currently holds a family you set up yourself. Joining replaces it on this device (it stays in your account).</p>`:''}
+    <div id="au-err" role="alert"></div>
+    <div class="choices" style="margin-top:14px"><button class="btn pri" onclick="joinWithCode()">Join</button><button class="btn" onclick="try{sessionStorage.removeItem(INVITE_KEY)}catch(e){};backToFamily()">Cancel</button></div></div></div>`;
+  const f=$('jn-code');if(f&&!f.value)f.focus();
+}
+async function joinWithCode(){
+  const code=$('jn-code').value.trim(),box=$('au-err');
+  const msg=m=>{box.innerHTML=`<div class="banner bad" style="margin:12px 0 0">${ic('alert',18)}<div class="small">${esc(m)}</div></div>`};
+  if(!code)return msg('Enter the invite code.');
+  const {error}=await sb.rpc('redeem_invite',{p_code:code});
+  if(error)return msg(error.message);
+  try{sessionStorage.removeItem(INVITE_KEY)}catch(e){}
+  try{localStorage.removeItem(KEY)}catch(e){}
+  setDirty(false);clearViewer();S=null;onb=freshOnb();ui.modal=null;ui.tab='home';
+  if(await afterSignIn(false))toast('Welcome — you have joined the family');else showWelcome();
+}
 function startSetup(){if(SBU)onbGo(1);else showAuth('up','setup')}
 function showAuth(mode,next){
   authCtx={mode,next:next||null};const up=mode==='up';
@@ -2715,7 +2845,7 @@ function showAuth(mode,next){
   $('app').innerHTML=`<div class="welcome"><div class="card">
     <div class="brand" style="padding:0"><i></i>Homeroom</div>
     <h1>${up?'Create your account':'Sign in'}</h1>
-    <p class="lead">${up?'Your family’s data is saved to your account, so it is available on any device.':'Welcome back — sign in to load your family.'}</p>
+    <p class="lead">${authCtx.next==='join'?'Create an account (or sign in) first, then enter your invite code.':up?'Your family’s data is saved to your account, so it is available on any device.':'Welcome back — sign in to load your family.'}</p>
     <div class="fld"><label class="f" for="au-email">Email</label><input type="text" id="au-email" inputmode="email" autocomplete="email"></div>
     <div class="fld"><label class="f" for="au-pw">Password</label><input type="password" id="au-pw" autocomplete="${up?'new-password':'current-password'}" onkeydown="if(event.key==='Enter')authSubmit()"></div>
     <div id="au-err" role="alert"></div>
@@ -2734,6 +2864,7 @@ async function authSubmit(){
   if(r.error)return msg(r.error.message);
   if(!r.data.session){authCtx.mode='in';return msg('Check your email to confirm your account, then come back and sign in.','info')}
   SBU=r.data.session.user;
+  if(authCtx.next==='join'||pendingInvite())return showJoin();
   if(await afterSignIn(false))return;
   if(authCtx.next==='setup')onbGo(1);else showWelcome();
 }
@@ -2741,19 +2872,26 @@ async function authSubmit(){
 /* =====================================================================
    BOOT
    ===================================================================== */
+function bootAuth(data){
+  SBU=data.session?data.session.user:null;
+  if(pendingInvite()){if(SBU)showJoin();else showAuth('up','join');return}
+  if(SBU)afterSignIn(true).then(ok=>{if(!ok&&!S)showWelcome()});
+}
 (function boot(){
   const st=document.createElement('style');st.textContent='.mob-only{display:block}@media(min-width:900px){.mob-only{display:none}}.mob-only .viewas select{max-width:150px}';document.head.appendChild(st);
+  try{const q=new URLSearchParams(location.search).get('invite');if(q){sessionStorage.setItem(INVITE_KEY,q.trim().toUpperCase());history.replaceState(null,'',location.pathname)}}catch(e){}
   S=loadState();
-  if(!S){showWelcome();if(sb)sb.auth.getSession().then(({data})=>{SBU=data.session?data.session.user:null;if(SBU)afterSignIn(true).then(ok=>{if(!ok)showWelcome()})});return}                                   // first launch: Welcome screen, nothing seeded
+  if(!S){showWelcome();if(sb)sb.auth.getSession().then(({data})=>bootAuth(data));return}                                   // first launch: Welcome screen, nothing seeded
   if(!S.mode)S.mode=S.households.some(h=>h.id==='hh_hala')?'demo':'real';   // browsers with saved V2 data
   S.settings=S.settings||{horizon:112,weekStart:0};
   upgradeDemo();
   CH=(S.households[0]||{}).id||CH;
   syncSessions();persist();
   const adm=hhPeople(CH).find(p=>p.role==='admin'&&p.active!==false)||S.people.find(p=>p.role==='admin'&&p.active!==false);V={kind:'admin',id:adm?adm.id:null};
+  restoreViewer();
   if(S.onboarding&&S.onboarding.active)onbFromS();
   render();
-  if(sb)sb.auth.getSession().then(({data})=>{SBU=data.session?data.session.user:null;if(SBU)afterSignIn(true)});
+  if(sb)sb.auth.getSession().then(({data})=>bootAuth(data));
 })();
 </script>
 </body>
